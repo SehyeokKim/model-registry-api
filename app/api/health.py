@@ -1,7 +1,9 @@
 """운영 엔드포인트. API 버전과 무관하게 경로를 고정한다."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from sqlalchemy import Engine, text
 
+from app.schemas.error import ErrorResponse
 from app.schemas.health import HealthResponse
 
 router = APIRouter(prefix="/health", tags=["Health"])
@@ -17,4 +19,26 @@ router = APIRouter(prefix="/health", tags=["Health"])
     response_model=HealthResponse,
 )
 def live() -> HealthResponse:
+    return HealthResponse(status="ok")
+
+
+@router.get(
+    "/ready",
+    summary="요청 처리 준비 확인",
+    description=(
+        "DB 연결까지 확인한다. Kubernetes readiness probe와 compose healthcheck가 사용한다. "
+        "실패하면 트래픽 대상에서 잠시 빠지며, 컨테이너는 재시작하지 않는다."
+    ),
+    response_model=HealthResponse,
+    responses={
+        503: {
+            "model": ErrorResponse,
+            "description": "DB에 접속할 수 없음 (`SERVICE_UNAVAILABLE`, `Retry-After` 헤더 포함)",
+        }
+    },
+)
+def ready(request: Request) -> HealthResponse:
+    engine: Engine = request.app.state.engine
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
     return HealthResponse(status="ok")

@@ -37,7 +37,7 @@
 ## 기술 스택
 - Python 3.12, FastAPI, Pydantic v2
 - 패키지 관리: uv (`pyproject.toml` + `uv.lock` 커밋, 런타임/개발 의존성 그룹 분리)
-- SQLAlchemy 2.0, Alembic
+- SQLAlchemy 2.1 (2.0 스타일 API), Alembic, psycopg 3
 - jsonschema (버전 입출력 스키마의 메타스키마 검증)
 - PostgreSQL 16
 - pytest, httpx
@@ -219,9 +219,10 @@ model-registry-api/
 │   └── main.py           # 앱 팩토리
 ├── migrations/           # Alembic (env.py, versions/)
 ├── tests/
-│   ├── unit/             # 서비스 로직 단위 테스트
+│   ├── unit/             # DB 없이 실행하는 테스트 (서비스 로직, 미들웨어 등)
 │   ├── integration/      # API + 실제 PostgreSQL 통합 테스트
-│   └── conftest.py
+│   ├── conftest.py
+│   └── support.py        # 테스트 공용 헬퍼 (테스트용 설정 등)
 ├── scripts/
 │   ├── seed.py           # 멱등 데모 데이터 시드 (migrate 서비스에서 실행)
 │   └── purge_expired_models.py   # 복원 기한이 지난 모델 영구 삭제 (CronJob으로 실행)

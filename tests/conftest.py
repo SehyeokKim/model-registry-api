@@ -4,13 +4,19 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.config import LogFormat, Settings
+from app.core.config import Settings
 from app.main import create_app
+from tests.support import make_settings
 
 
 @pytest.fixture
-def app() -> FastAPI:
-    return create_app(Settings(log_level="INFO", log_format=LogFormat.JSON))
+def settings() -> Settings:
+    return make_settings()
+
+
+@pytest.fixture
+def app(settings: Settings) -> FastAPI:
+    return create_app(settings)
 
 
 @pytest.fixture

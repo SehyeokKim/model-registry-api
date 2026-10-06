@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.core.errors import ErrorCode, error_body
+
 REQUEST_ID_HEADER = "X-Request-ID"
 
 # 상위 시스템이 보낸 요청 ID는 이 형식일 때만 그대로 쓴다.
@@ -46,7 +48,7 @@ def resolve_request_id(value: str | None) -> str:
 
 
 _INTERNAL_ERROR_BODY = json.dumps(
-    {"error": {"code": "INTERNAL_ERROR", "message": "Internal server error.", "details": None}}
+    error_body(ErrorCode.INTERNAL_ERROR, "Internal server error.")
 ).encode()
 
 
