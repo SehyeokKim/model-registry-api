@@ -1,0 +1,15 @@
+# 로컬 테스트용 설정. DB 포트를 호스트에 노출해 호스트의 pytest가 접속할 수 있게 한다 (ADR 0004).
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d db
+#   uv run pytest
+#
+# 5432 포트를 이미 쓰고 있으면 DB_PORT로 바꾼다 (테스트도 같은 DB_PORT를 읽는다).
+#   DB_PORT=55432 docker compose -f compose.yaml -f compose.dev.yaml up -d db
+#   DB_PORT=55432 uv run pytest
+#
+# 파일 이름을 compose.override.yaml로 하지 않는다. 그 이름은 `docker compose up` 시
+# 자동으로 병합되어 기본 실행에서도 DB 포트가 노출된다.
+services:
+  db:
+    ports:
+      - "${DB_PORT:-5432}:5432"

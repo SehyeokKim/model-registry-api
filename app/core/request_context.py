@@ -40,6 +40,11 @@ def current_context() -> RequestContext | None:
     return _current.get()
 
 
+def _access_log_level(path: str) -> int:
+    """헬스 체크는 probe가 몇 초마다 호출하므로 DEBUG로 남겨 접근 로그를 덮지 않게 한다."""
+    return logging.DEBUG if path.startswith("/health/") else logging.INFO
+
+
 def resolve_request_id(value: str | None) -> str:
     """유효한 요청 ID는 그대로 쓰고, 없거나 형식이 맞지 않으면 새로 만든다."""
     if value is not None and _REQUEST_ID_PATTERN.fullmatch(value):
@@ -91,7 +96,8 @@ class RequestContextMiddleware:
                 raise
             await self._send_internal_error(send_with_request_id)
         finally:
-            access_logger.info(
+            access_logger.log(
+                _access_log_level(scope["path"]),
                 "Request completed",
                 extra={
                     "method": scope["method"],

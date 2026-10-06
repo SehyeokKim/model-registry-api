@@ -1,0 +1,24 @@
+# 이미지에 필요한 것: uv.lock, pyproject.toml, .python-version, alembic.ini, app/, migrations/, scripts/
+.git
+.github
+.venv
+.env
+.env.*
+!.env.example
+
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+tests
+docs
+*.md
+compose*.yaml
+Dockerfile
+.dockerignore
+.editorconfig
+.gitattributes
+.gitignore

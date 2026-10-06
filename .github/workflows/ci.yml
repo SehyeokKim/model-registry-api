@@ -41,6 +41,9 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check .
 
+      - name: Hadolint
+        run: docker run --rm -i hadolint/hadolint:v2.14.0 < Dockerfile
+
   test:
     name: Test
     runs-on: ubuntu-24.04
@@ -76,3 +79,38 @@ jobs:
 
       - name: Pytest
         run: uv run pytest
+
+  # 실제 실행 경로(`docker compose up -d`)가 깨지지 않았는지 확인한다.
+  compose:
+    name: Compose
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Start services
+        run: docker compose up -d --build --wait --wait-timeout 180
+
+      - name: Check migrate exited successfully
+        run: test "$(docker compose ps -a migrate --format '{{.ExitCode}}')" = "0"
+
+      - name: Check readiness
+        run: curl --fail --silent --show-error http://localhost:8000/health/ready
+
+      - name: Check demo data
+        run: |
+          users=$(docker compose exec -T db psql -U registry -d registry -tAc "SELECT count(*) FROM users")
+          test "$users" = "4"
+
+      - name: Check idempotent restart
+        run: |
+          docker compose up -d --wait --wait-timeout 180
+          test "$(docker compose ps -a migrate --format '{{.ExitCode}}')" = "0"
+
+      - name: Show logs
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop services
+        if: always()
+        run: docker compose down -v

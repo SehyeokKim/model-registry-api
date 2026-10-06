@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     db_pool_timeout: float = Field(default=5.0, gt=0, description="커넥션을 기다리는 최대 시간(초)")
     db_connect_timeout: int = Field(default=5, ge=1, description="DB 접속 시도 최대 시간(초)")
 
+    # migrate 서비스가 마이그레이션 후 데모 데이터를 넣을지 여부
+    seed_demo_data: bool = True
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _uppercase_log_level(cls, value: object) -> object:

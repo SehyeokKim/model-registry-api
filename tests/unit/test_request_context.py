@@ -105,10 +105,22 @@ def test_access_log_has_request_fields(
     client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.INFO, logger="app.access"):
+        client.get("/openapi.json")
+
+    record = next(r for r in caplog.records if r.name == "app.access")
+    assert record.levelno == logging.INFO
+    assert record.method == "GET"  # type: ignore[attr-defined]
+    assert record.path == "/openapi.json"  # type: ignore[attr-defined]
+    assert record.status == 200  # type: ignore[attr-defined]
+    assert record.latency_ms >= 0  # type: ignore[attr-defined]
+
+
+def test_health_check_access_log_is_debug_level(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.DEBUG, logger="app.access"):
         client.get("/health/live")
 
     record = next(r for r in caplog.records if r.name == "app.access")
-    assert record.method == "GET"  # type: ignore[attr-defined]
+    assert record.levelno == logging.DEBUG
     assert record.path == "/health/live"  # type: ignore[attr-defined]
-    assert record.status == 200  # type: ignore[attr-defined]
-    assert record.latency_ms >= 0  # type: ignore[attr-defined]
