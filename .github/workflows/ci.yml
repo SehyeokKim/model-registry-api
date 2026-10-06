@@ -120,6 +120,12 @@ jobs:
             -H "X-User-Id: $DEMO_USER" | jq -e '.name == "ci-smoke"'
           curl --fail --silent --show-error "$API" -H "X-User-Id: $DEMO_USER" \
             | jq -e --arg id "$model_id" '[.items[].id] == [$id] and .next_cursor == null'
+          curl --fail --silent --show-error -X POST "$API/$model_id/versions" \
+            -H "X-User-Id: $DEMO_USER" -H "Content-Type: application/json" \
+            -d '{"input_schema": {"type": "object"}}' \
+            | jq -e '.version_no == 1 and .status == "PENDING"'
+          curl --fail --silent --show-error "$API" -H "X-User-Id: $DEMO_USER" \
+            | jq -e '.items[0].version_count == 1 and .items[0].latest_version_no == 1'
 
       - name: Check idempotent restart
         run: |

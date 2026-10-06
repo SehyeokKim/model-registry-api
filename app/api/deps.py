@@ -14,6 +14,7 @@ from app.core.request_context import current_context
 from app.db.entities import User
 from app.repositories.user_repository import UserRepository
 from app.services.model_service import ModelService
+from app.services.model_version_service import ModelVersionService
 from app.services.requester import Requester
 
 USER_ID_HEADER = "X-User-Id"
@@ -79,3 +80,10 @@ def get_model_service(request: Request, session: SessionDep) -> ModelService:
 
 
 ModelServiceDep = Annotated[ModelService, Depends(get_model_service)]
+
+
+def get_model_version_service(session: SessionDep) -> ModelVersionService:
+    return ModelVersionService(session)
+
+
+ModelVersionServiceDep = Annotated[ModelVersionService, Depends(get_model_version_service)]

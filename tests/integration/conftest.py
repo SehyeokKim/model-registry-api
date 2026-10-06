@@ -7,18 +7,21 @@
 """
 
 import os
-from collections.abc import Iterator
+import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import URL, Engine, create_engine, make_url, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.base import Base
-from tests.support import make_settings
+from tests.support import CUSTOMER_A1, as_user, make_settings
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -93,3 +96,18 @@ def db_session(engine: Engine) -> Iterator[Session]:
 @pytest.fixture
 def settings(database_url: URL) -> Settings:
     return make_settings(database_url=database_url.render_as_string(hide_password=False))
+
+
+@pytest.fixture
+def create_model(client: TestClient) -> Callable[..., dict[str, Any]]:
+    """API로 모델을 만들고 응답 본문을 돌려준다. 요청자 사용자가 시드되어 있어야 한다."""
+
+    def _create(
+        name: str = "churn-predictor", user: uuid.UUID = CUSTOMER_A1, **fields: Any
+    ) -> dict[str, Any]:
+        body = {"name": name, "task_type": "CLASSIFICATION", **fields}
+        response = client.post("/api/v1/models", json=body, headers=as_user(user))
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    return _create

@@ -34,7 +34,8 @@ AutoML 플랫폼의 모델 관리 API. 고객 조직의 모델과 모델 버전�
 """
 
 OPENAPI_TAGS = [
-    {"name": "Models", "description": "모델 생명주기 (생성, 조회, 수정, 소프트 삭제)"},
+    {"name": "Models", "description": "모델 생명주기 (생성, 조회, 수정, 소프트 삭제, 목록, 복원)"},
+    {"name": "Model Versions", "description": "모델 버전 (학습 결과물 단위, 생성 후 불변)"},
     {"name": "Health", "description": "운영 엔드포인트 (Kubernetes probe, compose healthcheck)"},
 ]
 

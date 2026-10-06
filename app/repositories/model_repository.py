@@ -36,17 +36,18 @@ class ModelRepository:
         *,
         include_deleted: bool = False,
         for_update: bool = False,
+        load_versions: bool = True,
     ) -> MLModel | None:
-        """조직의 모델을 버전 목록과 함께 가져온다. 기본은 활성(삭제되지 않은) 모델만 찾는다.
+        """조직의 모델을 가져온다. 기본은 활성(삭제되지 않은) 모델만 찾고, 버전 목록도 함께 읽는다.
 
         for_update=True면 모델 행을 FOR NO KEY UPDATE로 잠근다. 같은 모델에 대한 수정, 삭제,
         복원, 버전 생성이 이 잠금에서 직렬화된다 (ADR 0003).
         """
-        statement = (
-            select(MLModel)
-            .where(MLModel.id == model_id, MLModel.organization_id == organization_id)
-            .options(selectinload(MLModel.versions))
+        statement = select(MLModel).where(
+            MLModel.id == model_id, MLModel.organization_id == organization_id
         )
+        if load_versions:
+            statement = statement.options(selectinload(MLModel.versions))
         if not include_deleted:
             statement = statement.where(MLModel.deleted_at.is_(None))
         if for_update:

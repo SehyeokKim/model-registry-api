@@ -52,8 +52,14 @@ class MLModelVersion(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     # 저장 경로는 version_no가 아니라 UUID로 만든다: models/{model_id}/versions/{version_id}/
     artifact_uri: Mapped[str | None] = mapped_column(Text)
     framework: Mapped[str | None] = mapped_column(String(50))
-    input_schema: Mapped[dict[str, Any] | None]
-    output_schema: Mapped[dict[str, Any] | None]
+    # 스키마 문서는 클 수 있고 모델 조회 응답에는 쓰지 않으므로 기본으로 읽지 않는다.
+    # 필요한 곳에서 undefer로 명시하고, 실수로 접근하면 추가 쿼리 대신 예외가 나게 한다.
+    input_schema: Mapped[dict[str, Any] | None] = mapped_column(
+        deferred=True, deferred_raiseload=True
+    )
+    output_schema: Mapped[dict[str, Any] | None] = mapped_column(
+        deferred=True, deferred_raiseload=True
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
     model: Mapped["MLModel"] = relationship(back_populates="versions", lazy="raise")

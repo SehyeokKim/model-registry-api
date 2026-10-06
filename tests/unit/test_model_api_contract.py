@@ -69,6 +69,15 @@ class TestOpenApi:
                 "422",
                 "503",
             },
+            ("/api/v1/models/{model_id}/versions", "post"): {
+                "201",
+                "401",
+                "403",
+                "404",
+                "409",
+                "422",
+                "503",
+            },
         }
         for (path, method), statuses in expected.items():
             operation = paths[path][method]

@@ -21,6 +21,8 @@ class ErrorCode(StrEnum):
     TASK_TYPE_LOCKED = "TASK_TYPE_LOCKED"
     MODEL_NOT_DELETED = "MODEL_NOT_DELETED"
     MODEL_PURGED = "MODEL_PURGED"
+    INVALID_PARENT_VERSION = "INVALID_PARENT_VERSION"
+    MODEL_VERSION_CONFLICT = "MODEL_VERSION_CONFLICT"
     EMPTY_UPDATE = "EMPTY_UPDATE"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -77,6 +79,16 @@ ERROR_CATALOG: dict[ErrorCode, ErrorSpec] = {
         410,
         "복원 기한(`purge_at`)이 지나 복원할 수 없는 모델 (영구 삭제 대기 중)",
         "The restore deadline has passed and the model is pending permanent deletion.",
+    ),
+    ErrorCode.INVALID_PARENT_VERSION: ErrorSpec(
+        422,
+        "부모 버전이 없거나, 다른 모델의 버전이거나, `READY` 상태가 아님",
+        "The parent version must be a READY version of the same model.",
+    ),
+    ErrorCode.MODEL_VERSION_CONFLICT: ErrorSpec(
+        409,
+        "버전 번호가 동시에 생성된 다른 버전과 겹침 (다시 시도하면 된다)",
+        "A version with the same number was created concurrently. Retry the request.",
     ),
     ErrorCode.EMPTY_UPDATE: ErrorSpec(
         422, "변경할 필드가 없는 수정 요청(`{}`)", "At least one field must be provided."

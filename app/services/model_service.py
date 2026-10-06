@@ -138,17 +138,37 @@ class ModelService:
     def _get_active(
         self, requester: Requester, model_id: uuid.UUID, *, for_update: bool = False
     ) -> MLModel:
-        model = self._models.get(requester.organization_id, model_id, for_update=for_update)
-        if model is None:
-            raise AppError(ErrorCode.MODEL_NOT_FOUND)
-        return model
+        return get_active_model(self._models, requester, model_id, for_update=for_update)
 
     def _touch(self, model: MLModel) -> datetime:
-        """쓰기 공통 처리: DB 시각으로 updated_at을 갱신하고 row_version을 올린다."""
-        now = self._models.current_timestamp()
-        model.updated_at = now
-        model.row_version += 1
-        return now
+        return touch_model(self._models, model)
+
+
+def get_active_model(
+    models: ModelRepository,
+    requester: Requester,
+    model_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+    load_versions: bool = True,
+) -> MLModel:
+    """요청자 조직의 활성 모델. 없거나, 삭제되었거나, 다른 조직 소유면 MODEL_NOT_FOUND."""
+    model = models.get(
+        requester.organization_id, model_id, for_update=for_update, load_versions=load_versions
+    )
+    if model is None:
+        raise AppError(ErrorCode.MODEL_NOT_FOUND)
+    return model
+
+
+def touch_model(models: ModelRepository, model: MLModel) -> datetime:
+    """모델 단건 응답이 바뀌는 쓰기의 공통 처리: DB 시각으로 updated_at을 갱신하고
+    row_version을 올린다 (ADR 0007). 모델 행을 잠근 트랜잭션 안에서 호출한다.
+    """
+    now = models.current_timestamp()
+    model.updated_at = now
+    model.row_version += 1
+    return now
 
 
 @contextmanager

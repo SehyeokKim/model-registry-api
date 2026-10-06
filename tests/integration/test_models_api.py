@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, delete, event, func, select, update
 from sqlalchemy.orm import Session
 
-from app.db.entities import MLModel, MLModelVersion, ModelVersionStatus
+from app.db.entities import MLModel
 from scripts.seed import seed_demo_data
 from tests.support import (
     CUSTOMER_A1,
@@ -22,6 +22,7 @@ from tests.support import (
     ML_ENGINEER,
     ORGANIZATION_A,
     as_user,
+    insert_version,
 )
 
 MODELS = "/api/v1/models"
@@ -30,32 +31,6 @@ MODELS = "/api/v1/models"
 @pytest.fixture(autouse=True)
 def _demo_data(engine: Engine) -> None:
     seed_demo_data(engine)
-
-
-@pytest.fixture
-def create_model(client: TestClient) -> Callable[..., dict[str, Any]]:
-    def _create(
-        name: str = "churn-predictor", user: uuid.UUID = CUSTOMER_A1, **fields: Any
-    ) -> dict[str, Any]:
-        body = {"name": name, "task_type": "CLASSIFICATION", **fields}
-        response = client.post(MODELS, json=body, headers=as_user(user))
-        assert response.status_code == 201, response.text
-        return response.json()
-
-    return _create
-
-
-def _add_version(engine: Engine, model_id: str, version_no: int = 1) -> None:
-    """버전 API는 이후 PR에서 추가되므로 DB에 직접 넣는다."""
-    with Session(engine) as session, session.begin():
-        session.add(
-            MLModelVersion(
-                model_id=uuid.UUID(model_id),
-                version_no=version_no,
-                created_by=CUSTOMER_A1,
-                status=ModelVersionStatus.PENDING,
-            )
-        )
 
 
 def _error_code(response: Any) -> str:
@@ -184,8 +159,8 @@ class TestGet:
         self, client: TestClient, engine: Engine, create_model: Callable[..., dict[str, Any]]
     ) -> None:
         model = create_model()
-        _add_version(engine, model["id"], 1)
-        _add_version(engine, model["id"], 2)
+        insert_version(engine, model["id"], 1)
+        insert_version(engine, model["id"], 2)
 
         response = client.get(f"{MODELS}/{model['id']}", headers=as_user(CUSTOMER_A1))
 
@@ -294,7 +269,7 @@ class TestUpdate:
         self, client: TestClient, engine: Engine, create_model: Callable[..., dict[str, Any]]
     ) -> None:
         model = create_model()
-        _add_version(engine, model["id"])
+        insert_version(engine, model["id"])
 
         response = client.patch(
             f"{MODELS}/{model['id']}",
@@ -309,7 +284,7 @@ class TestUpdate:
         self, client: TestClient, engine: Engine, create_model: Callable[..., dict[str, Any]]
     ) -> None:
         model = create_model()
-        _add_version(engine, model["id"])
+        insert_version(engine, model["id"])
 
         response = client.patch(
             f"{MODELS}/{model['id']}",
@@ -475,8 +450,8 @@ class TestList:
         self, client: TestClient, engine: Engine, create_model: Callable[..., dict[str, Any]]
     ) -> None:
         with_versions = create_model("with-versions", description="설명")
-        _add_version(engine, with_versions["id"], 1)
-        _add_version(engine, with_versions["id"], 2)
+        insert_version(engine, with_versions["id"], 1)
+        insert_version(engine, with_versions["id"], 2)
         create_model("no-versions")
 
         items = {item["name"]: item for item in _list(client)["items"]}
@@ -610,11 +585,11 @@ class TestList:
             return len(statements)
 
         model = create_model("one")
-        _add_version(engine, model["id"])
+        insert_version(engine, model["id"])
         with_one = queries_for_list()
         for i in range(5):
             model = create_model(f"more-{i}")
-            _add_version(engine, model["id"])
+            insert_version(engine, model["id"])
 
         assert queries_for_list() == with_one
 
@@ -629,7 +604,7 @@ class TestRestore:
         self, client: TestClient, engine: Engine, create_model: Callable[..., dict[str, Any]]
     ) -> None:
         model = create_model("restorable")
-        _add_version(engine, model["id"])
+        insert_version(engine, model["id"])
         self._delete(client, model["id"])
 
         response = client.post(f"{MODELS}/{model['id']}/restore", headers=as_user(CUSTOMER_A2))
