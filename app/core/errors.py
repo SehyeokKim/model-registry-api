@@ -25,6 +25,7 @@ class ErrorCode(StrEnum):
     MODEL_VERSION_CONFLICT = "MODEL_VERSION_CONFLICT"
     MODEL_VERSION_NOT_FOUND = "MODEL_VERSION_NOT_FOUND"
     INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
+    PRECONDITION_FAILED = "PRECONDITION_FAILED"
     EMPTY_UPDATE = "EMPTY_UPDATE"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -101,6 +102,11 @@ ERROR_CATALOG: dict[ErrorCode, ErrorSpec] = {
         409,
         "허용되지 않은 버전 상태 전이 (같은 상태로의 전이 포함)",
         "The status transition is not allowed.",
+    ),
+    ErrorCode.PRECONDITION_FAILED: ErrorSpec(
+        412,
+        "`If-Match`의 ETag가 현재 모델과 다름 (응답에 현재 `ETag` 헤더 포함)",
+        "The model has been modified. Fetch the latest version and retry.",
     ),
     ErrorCode.EMPTY_UPDATE: ErrorSpec(
         422, "변경할 필드가 없는 수정 요청(`{}`)", "At least one field must be provided."

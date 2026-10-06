@@ -148,6 +148,23 @@ jobs:
             -d "{\"status\": \"READY\", \"artifact_uri\": \"$uri\"}" \
             | jq -e --arg uri "$uri" '.status == "READY" and .artifact_uri == $uri'
 
+      - name: Check conditional update with ETag
+        env:
+          API: http://localhost:8000/api/v1/models
+          DEMO_USER: 00000000-0000-0000-0000-000000000001
+        run: |
+          etag=$(curl --fail --silent --show-error --output /dev/null --dump-header - \
+            "$API/$model_id" -H "X-User-Id: $DEMO_USER" \
+            | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
+          test -n "$etag"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -X PATCH \
+            "$API/$model_id" -H "X-User-Id: $DEMO_USER" -H 'If-Match: "0"' \
+            -H "Content-Type: application/json" -d '{"description": "stale"}')" = "412"
+          curl --fail --silent --show-error -X PATCH "$API/$model_id" \
+            -H "X-User-Id: $DEMO_USER" -H "If-Match: $etag" \
+            -H "Content-Type: application/json" -d '{"description": "fresh"}' \
+            | jq -e '.description == "fresh"'
+
       - name: Check idempotent restart
         run: |
           docker compose up -d --wait --wait-timeout 180

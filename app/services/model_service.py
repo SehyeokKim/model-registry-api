@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import ErrorCode
+from app.core.etag import IfMatch, format_etag
 from app.core.exceptions import AppError
 from app.db.entities import MLModel, ModelStatusFilter, TaskType
 from app.db.errors import violated_constraint
@@ -80,7 +81,14 @@ class ModelService:
         last = items[-1]
         return ModelPage(items=items, next_position=(last.created_at, last.id))
 
-    def update(self, requester: Requester, model_id: uuid.UUID, changes: dict[str, Any]) -> MLModel:
+    def update(
+        self,
+        requester: Requester,
+        model_id: uuid.UUID,
+        changes: dict[str, Any],
+        *,
+        if_match: IfMatch | None = None,
+    ) -> MLModel:
         """`changes`에는 클라이언트가 실제로 보낸 필드만 담는다 (JSON Merge Patch)."""
         if not changes:
             raise AppError(ErrorCode.EMPTY_UPDATE)
@@ -90,6 +98,7 @@ class ModelService:
 
         with _translate_name_conflict(), self._session.begin():
             model = self._get_active(requester, model_id, for_update=True)
+            _check_precondition(model, if_match)
             new_task_type = changes.get("task_type", model.task_type)
             # 버전 목록은 잠금 안에서 읽었으므로, 확인 직후 버전이 생기는 경쟁이 없다.
             if new_task_type != model.task_type and model.versions:
@@ -101,20 +110,25 @@ class ModelService:
             self._models.flush()
         return model
 
-    def delete(self, requester: Requester, model_id: uuid.UUID) -> MLModel:
+    def delete(
+        self, requester: Requester, model_id: uuid.UUID, *, if_match: IfMatch | None = None
+    ) -> MLModel:
         """소프트 삭제. purge_at까지 복원할 수 있고, 이후 영구 삭제 배치가 지운다 (ADR 0005)."""
         with self._session.begin():
             model = self._get_active(requester, model_id, for_update=True)
+            _check_precondition(model, if_match)
             now = self._touch(model)
             model.deleted_at = now
             model.purge_at = now + self._restore_window
             self._models.flush()
         return model
 
-    def restore(self, requester: Requester, model_id: uuid.UUID) -> MLModel:
+    def restore(
+        self, requester: Requester, model_id: uuid.UUID, *, if_match: IfMatch | None = None
+    ) -> MLModel:
         """복원 기한(purge_at) 전의 삭제된 모델을 되살린다.
 
-        기한이 지난 모델은 영구 삭제 대기 중일 뿐 삭제가 확정되었으므로 복원하지 않는다 (ADR 0005).
+        기한이 지난 모델은 영구 삭제된 것으로 보고 복원하지 않는다 (ADR 0005, 0009).
         같은 이름의 활성 모델이 있으면 이름을 바꾸지 않고 충돌로 알린다 (ADR 0009).
         """
         with _translate_name_conflict(), self._session.begin():
@@ -127,6 +141,7 @@ class ModelService:
                 raise AppError(ErrorCode.MODEL_NOT_DELETED)
             if model.purge_at <= self._models.current_timestamp():
                 raise AppError(ErrorCode.MODEL_PURGED)
+            _check_precondition(model, if_match)
 
             model.deleted_at = None
             model.purge_at = None
@@ -169,6 +184,18 @@ def touch_model(models: ModelRepository, model: MLModel) -> datetime:
     model.updated_at = now
     model.row_version += 1
     return now
+
+
+def _check_precondition(model: MLModel, if_match: IfMatch | None) -> None:
+    """If-Match가 있으면 잠근 모델의 현재 ETag와 비교한다 (ADR 0007).
+
+    RFC 9110에 따라 조건이 없어도 실패했을 요청(404, 409, 410)은 그 오류를 먼저 내고,
+    조건은 실제 변경 직전에 비교한다. 불일치하면 현재 ETag를 함께 돌려줘 다시 조회하게 한다.
+    """
+    if if_match is not None and not if_match.matches(model.row_version):
+        raise AppError(
+            ErrorCode.PRECONDITION_FAILED, headers={"ETag": format_etag(model.row_version)}
+        )
 
 
 @contextmanager

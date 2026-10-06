@@ -54,10 +54,19 @@ class TestOpenApi:
                 "403",
                 "404",
                 "409",
+                "412",
                 "422",
                 "503",
             },
-            ("/api/v1/models/{model_id}", "delete"): {"200", "401", "403", "404", "422", "503"},
+            ("/api/v1/models/{model_id}", "delete"): {
+                "200",
+                "401",
+                "403",
+                "404",
+                "412",
+                "422",
+                "503",
+            },
             ("/api/v1/models", "get"): {"200", "401", "403", "422", "503"},
             ("/api/v1/models/{model_id}/restore", "post"): {
                 "200",
@@ -66,6 +75,7 @@ class TestOpenApi:
                 "404",
                 "409",
                 "410",
+                "412",
                 "422",
                 "503",
             },
@@ -115,3 +125,30 @@ def test_internal_api_is_tagged_separately(client: TestClient) -> None:
     operation = schema["paths"]["/internal/v1/model-versions/{version_id}/status"]["patch"]
     assert operation["tags"] == ["Internal"]
     assert "Internal" in {tag["name"] for tag in schema["tags"]}
+
+
+class TestEtagDocumentation:
+    SINGLE_MODEL_RESPONSES = (
+        ("/api/v1/models", "post", "201"),
+        ("/api/v1/models/{model_id}", "get", "200"),
+        ("/api/v1/models/{model_id}", "patch", "200"),
+        ("/api/v1/models/{model_id}/restore", "post", "200"),
+    )
+    CONDITIONAL_WRITES = (
+        ("/api/v1/models/{model_id}", "patch"),
+        ("/api/v1/models/{model_id}", "delete"),
+        ("/api/v1/models/{model_id}/restore", "post"),
+    )
+
+    def test_single_model_responses_document_etag_header(self, client: TestClient) -> None:
+        paths = client.get("/openapi.json").json()["paths"]
+
+        for path, method, status in self.SINGLE_MODEL_RESPONSES:
+            assert "ETag" in paths[path][method]["responses"][status]["headers"], (path, method)
+
+    def test_conditional_writes_accept_if_match_header(self, client: TestClient) -> None:
+        paths = client.get("/openapi.json").json()["paths"]
+
+        for path, method in self.CONDITIONAL_WRITES:
+            headers = {p["name"] for p in paths[path][method]["parameters"] if p["in"] == "header"}
+            assert "if-match" in headers, (path, method)
