@@ -1,8 +1,9 @@
 # AutoML 플랫폼 ERD
 
-AutoML 플랫폼 전체 데이터 모델. 이 저장소는 이 중 `users`, `models`, `model_versions`를 구현한다. 스키마의 기준(source of truth)은 Alembic 마이그레이션이며, 이 문서는 설계 의도를 설명한다.
+AutoML 플랫폼 전체 데이터 모델. 이 저장소는 이 중 `organizations`, `users`, `models`, `model_versions`를 구현한다. 스키마의 기준(source of truth)은 Alembic 마이그레이션이며, 이 문서는 설계 의도를 설명한다.
 
 ## 설계 원칙
+- 고객 데이터(데이터셋, 모델)는 사용자 개인이 아니라 고객 조직(`organizations`)이 소유한다. 같은 조직의 사용자는 데이터를 공유하고, 다른 조직의 데이터는 볼 수 없다 (ADR 0006)
 - 파일(데이터 원본, 모델 아티팩트)은 오브젝트 스토리지에 저장하고 DB에는 메타데이터와 URI만 저장
 - 데이터와 모델은 "이름표(datasets/models) + 불변 버전(*_versions)" 구조. 수정/추가 시 덮어쓰지 않고 새 버전 생성 → 재현성 확보
 - 모델 삭제는 소프트 삭제(`deleted_at`) + 복원 기한(`purge_at`)
@@ -13,7 +14,8 @@ AutoML 플랫폼 전체 데이터 모델. 이 저장소는 이 중 `users`, `mod
 ## 테이블 요약
 | 영역 | 테이블 | 역할 |
 |---|---|---|
-| 사용자 | users | 고객/내부 사용자, role로 구분 |
+| 조직 | organizations | 고객사(테넌트). 데이터셋과 모델의 소유 단위 |
+| 사용자 | users | 고객/내부 사용자, role로 구분. 고객은 조직 하나에 속함 |
 | 데이터 | datasets | 데이터셋 이름표, 소프트 삭제 |
 | 데이터 | dataset_versions | 업로드 파일 1건, 원본/Parquet URI, 크기, 체크섬, 업로드 상태 |
 | 데이터 | dataset_columns | 버전별 컬럼명, 타입 |
@@ -29,8 +31,11 @@ AutoML 플랫폼 전체 데이터 모델. 이 저장소는 이 중 `users`, `mod
 
 ```mermaid
 erDiagram
-    users ||--o{ datasets : owns
-    users ||--o{ models : owns
+    organizations ||--o{ users : has
+    organizations ||--o{ datasets : owns
+    organizations ||--o{ models : owns
+    users ||--o{ datasets : creates
+    users ||--o{ models : creates
     users ||--o{ training_jobs : requests
     datasets ||--|{ dataset_versions : has
     dataset_versions ||--|{ dataset_columns : has
@@ -44,8 +49,14 @@ erDiagram
     models ||--o| deployments : "served_by"
     model_versions ||--o{ deployments : "active_in"
 
+    organizations {
+        uuid id PK
+        string name
+        timestamptz created_at
+    }
     users {
         uuid id PK
+        uuid organization_id FK "nullable, CUSTOMER는 필수"
         string email UK
         string name
         string role "CUSTOMER|ML_ENGINEER|ADMIN"
@@ -53,7 +64,8 @@ erDiagram
     }
     datasets {
         uuid id PK
-        uuid owner_id FK
+        uuid organization_id FK
+        uuid created_by FK
         string name
         text description
         timestamptz created_at
@@ -85,14 +97,16 @@ erDiagram
     }
     models {
         uuid id PK
-        uuid owner_id FK
-        string name "partial UK(owner_id, name) where deleted_at is null"
+        uuid organization_id FK
+        uuid created_by FK
+        string name "partial UK(organization_id, name) where deleted_at is null"
         string task_type "CLASSIFICATION|REGRESSION"
         text description
         timestamptz created_at
         timestamptz updated_at
         timestamptz deleted_at
         timestamptz purge_at
+        int row_version "ETag, 낙관적 잠금"
     }
     model_versions {
         uuid id PK
