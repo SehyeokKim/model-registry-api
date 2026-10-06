@@ -230,6 +230,7 @@ model-registry-api/
 │   └── adr/
 ├── .github/
 │   ├── workflows/        # CI (lint, test)
+│   ├── dependabot.yml    # Actions, Python 의존성 주간 업데이트 PR
 │   └── pull_request_template.md
 ├── Dockerfile
 ├── compose.yaml          # 실행용 (DB 포트 미노출)

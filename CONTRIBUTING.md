@@ -79,6 +79,9 @@ feat(models): 모델 CRUD API 추가
 
 ### 머지 전 체크리스트
 
+GitHub Actions CI(Lint, Test)가 PR마다 린트와 테스트를 실행한다. 저장소 플랜상 브랜치 보호 규칙으로 강제할 수 없으므로, 머지 전에 PR 화면에서 CI 통과를 직접 확인한다.
+
+- [ ] CI(Lint, Test) 통과
 - [ ] `uv run ruff check .`와 `uv run ruff format --check .` 통과
 - [ ] `uv run pytest` 통과
 - [ ] `docker compose down -v && docker compose up -d --build` 후 마이그레이션, 시드, API 기동 정상

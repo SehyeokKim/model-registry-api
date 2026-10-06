@@ -1,0 +1,32 @@
+# 의존성 업데이트 PR을 주 1회 자동으로 만든다.
+# PR 제목은 영어로 생성되므로, squash merge 시 CONTRIBUTING.md 커밋 규칙에 맞게 제목을 고친다.
+version: 2
+updates:
+  # 워크플로의 Actions (커밋 SHA 고정과 버전 주석을 함께 갱신)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Seoul
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Python 의존성 (pyproject.toml, uv.lock)
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Seoul
+    commit-message:
+      prefix: build
+      include: scope
+    open-pull-requests-limit: 5
+    groups:
+      # 개발 도구는 한 PR로 묶고, 런타임 의존성은 패키지별 PR로 나눠 영향을 따로 확인한다.
+      dev-dependencies:
+        dependency-type: development
