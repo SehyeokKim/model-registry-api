@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Request
 from sqlalchemy import Engine, text
 
-from app.schemas.error import ErrorResponse
+from app.core.errors import ErrorCode
+from app.schemas.error import error_responses
 from app.schemas.health import HealthResponse
 
 router = APIRouter(prefix="/health", tags=["Health"])
@@ -30,12 +31,7 @@ def live() -> HealthResponse:
         "실패하면 트래픽 대상에서 잠시 빠지며, 컨테이너는 재시작하지 않는다."
     ),
     response_model=HealthResponse,
-    responses={
-        503: {
-            "model": ErrorResponse,
-            "description": "DB에 접속할 수 없음 (`SERVICE_UNAVAILABLE`, `Retry-After` 헤더 포함)",
-        }
-    },
+    responses=error_responses(ErrorCode.SERVICE_UNAVAILABLE),
 )
 def ready(request: Request) -> HealthResponse:
     engine: Engine = request.app.state.engine

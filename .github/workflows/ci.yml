@@ -102,6 +102,19 @@ jobs:
           users=$(docker compose exec -T db psql -U registry -d registry -tAc "SELECT count(*) FROM users")
           test "$users" = "4"
 
+      - name: Call model API as demo user
+        env:
+          API: http://localhost:8000/api/v1/models
+          DEMO_USER: 00000000-0000-0000-0000-000000000001
+        run: |
+          model_id=$(curl --fail --silent --show-error -X POST "$API" \
+            -H "X-User-Id: $DEMO_USER" -H "Content-Type: application/json" \
+            -d '{"name": "ci-smoke", "task_type": "CLASSIFICATION"}' | jq -r .id)
+          curl --fail --silent --show-error "$API/$model_id" -H "X-User-Id: $DEMO_USER" \
+            | jq -e '.name == "ci-smoke" and .versions == []'
+          curl --fail --silent --show-error -X DELETE "$API/$model_id" -H "X-User-Id: $DEMO_USER" \
+            | jq -e '.purge_at != null'
+
       - name: Check idempotent restart
         run: |
           docker compose up -d --wait --wait-timeout 180

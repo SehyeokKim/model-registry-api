@@ -109,12 +109,14 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 - 클라이언트는 `code`로 분기하고, 화면 문구는 클라이언트가 사용자 언어(한국어, 일본어 등)로 현지화한다. 클라이언트는 `message`를 파싱하지 않는다. 그래서 `code`는 한 번 정하면 바꾸지 않는다.
 
 ### 에러 코드
-에러 코드는 `app/core/errors.py` 한 곳에 정의하고, README에 같은 표(코드, HTTP 상태, 발생 조건)로 정리한다. 코드를 추가하거나 바꾸면 README 표도 함께 고친다.
+에러 코드는 `app/core/errors.py`의 카탈로그(`ERROR_CATALOG`) 한 곳에서 HTTP 상태, 발생 조건, 기본 메시지와 함께 정의하고, README에 같은 표(코드, HTTP 상태, 발생 조건)로 정리한다. 코드를 추가하거나 바꾸면 README 표도 함께 고친다 (ADR 0008).
 
 | 코드 | HTTP | 발생 조건 |
 |---|---|---|
 | `UNAUTHORIZED` | 401 | `X-User-Id`가 없거나, UUID 형식이 아니거나, 존재하지 않는 사용자 |
 | `FORBIDDEN` | 403 | 내부 사용자가 고객 API를 호출하거나, 고객이 내부 API를 호출 |
+| `NOT_FOUND` | 404 | 정의되지 않은 경로 |
+| `METHOD_NOT_ALLOWED` | 405 | 경로가 지원하지 않는 HTTP 메서드 (`Allow` 헤더 포함) |
 | `MODEL_NOT_FOUND` | 404 | 모델이 없음, 삭제됨(조회/수정/삭제/버전 생성), 다른 조직 소유, 영구 삭제됨 |
 | `MODEL_VERSION_NOT_FOUND` | 404 | 내부 API에서 버전이 없거나, 모델이 영구 삭제됨 |
 | `INVALID_STATUS_TRANSITION` | 409 | 허용되지 않은 버전 상태 전이 (같은 상태로의 전이 포함) |
@@ -259,7 +261,8 @@ model-registry-api/
 
 ### 구현 규칙
 - 계층 의존 방향: `api → services → repositories → db.entities`. 역방향 의존 금지.
-- 도메인 예외(`NotFound`, `Conflict`, `Gone` 등)를 정의하고 전역 핸들러에서 HTTP 상태 코드로 매핑한다. 에러 코드와 응답 형식은 위 "API > 응답 형식, 에러 코드"를 따른다.
+- 도메인 예외는 `AppError(ErrorCode.XXX)`로 표현한다. 서비스 계층은 HTTP를 모른 채 에러 코드로 실패를 알리고, 전역 핸들러가 카탈로그의 HTTP 상태와 공통 응답 형식으로 바꾼다 (ADR 0008). 에러 코드와 응답 형식은 위 "API > 응답 형식, 에러 코드"를 따른다.
+- 엔드포인트의 OpenAPI `responses`는 `error_responses(ErrorCode...)`로 만든다. 낼 수 있는 에러 코드를 빠짐없이 적는다.
 - 트랜잭션 경계는 service 계층의 유스케이스 단위다. 수정, 삭제, 복원, 버전 생성, 버전 상태 변경은 각각 하나의 트랜잭션으로 처리하고, 모델 행을 `FOR NO KEY UPDATE`로 잠근다 (ADR 0003).
 - 시간: DB는 `timestamptz`, API 응답은 UTC ISO 8601(`2026-10-06T03:00:00Z`)로 통일한다. 서버 코드에서 naive datetime을 쓰지 않는다.
   - 근거: 저장과 API는 UTC로 두고 화면 표시만 현지 시간으로 바꾸는 것이 표준이다. 고객이 한 시간대에만 있으면 차이가 없지만, 시간대가 다르거나 서머타임이 있는 지역으로 확장하면 특정 시간대에 묶인 데이터를 변환해야 한다. 그래서 처음부터 UTC로 둔다.

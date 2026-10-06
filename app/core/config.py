@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # migrate 서비스가 마이그레이션 후 데모 데이터를 넣을지 여부
     seed_demo_data: bool = True
 
+    # 삭제된 모델을 복원할 수 있는 기간(일). purge_at = deleted_at + 이 기간
+    model_restore_window_days: int = Field(default=30, ge=1)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _uppercase_log_level(cls, value: object) -> object:

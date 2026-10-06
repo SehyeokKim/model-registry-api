@@ -52,9 +52,7 @@ def resolve_request_id(value: str | None) -> str:
     return str(uuid.uuid4())
 
 
-_INTERNAL_ERROR_BODY = json.dumps(
-    error_body(ErrorCode.INTERNAL_ERROR, "Internal server error.")
-).encode()
+_INTERNAL_ERROR_BODY = json.dumps(error_body(ErrorCode.INTERNAL_ERROR)).encode()
 
 
 class RequestContextMiddleware:
