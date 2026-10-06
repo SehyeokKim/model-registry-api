@@ -19,6 +19,8 @@ class ErrorCode(StrEnum):
     MODEL_NOT_FOUND = "MODEL_NOT_FOUND"
     MODEL_NAME_CONFLICT = "MODEL_NAME_CONFLICT"
     TASK_TYPE_LOCKED = "TASK_TYPE_LOCKED"
+    MODEL_NOT_DELETED = "MODEL_NOT_DELETED"
+    MODEL_PURGED = "MODEL_PURGED"
     EMPTY_UPDATE = "EMPTY_UPDATE"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -54,7 +56,8 @@ ERROR_CATALOG: dict[ErrorCode, ErrorSpec] = {
     ),
     ErrorCode.MODEL_NOT_FOUND: ErrorSpec(
         404,
-        "모델이 없거나, 삭제되었거나, 다른 조직 소유 (존재 여부를 드러내지 않음)",
+        "모델이 없거나, 삭제되었거나(복원 제외), 다른 조직 소유이거나, 영구 삭제됨 "
+        "(존재 여부를 드러내지 않음)",
         "Model not found.",
     ),
     ErrorCode.MODEL_NAME_CONFLICT: ErrorSpec(
@@ -66,6 +69,14 @@ ERROR_CATALOG: dict[ErrorCode, ErrorSpec] = {
         409,
         "버전이 있는 모델의 `task_type` 변경 시도",
         "task_type cannot be changed after a version has been created.",
+    ),
+    ErrorCode.MODEL_NOT_DELETED: ErrorSpec(
+        409, "삭제되지 않은 모델의 복원 시도", "The model is not deleted."
+    ),
+    ErrorCode.MODEL_PURGED: ErrorSpec(
+        410,
+        "복원 기한(`purge_at`)이 지나 복원할 수 없는 모델 (영구 삭제 대기 중)",
+        "The restore deadline has passed and the model is pending permanent deletion.",
     ),
     ErrorCode.EMPTY_UPDATE: ErrorSpec(
         422, "변경할 필드가 없는 수정 요청(`{}`)", "At least one field must be provided."

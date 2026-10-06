@@ -5,23 +5,33 @@ row_version을 1 올린다 (ADR 0003, 0007).
 """
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import AppError
-from app.db.entities import MLModel, TaskType
+from app.db.entities import MLModel, ModelStatusFilter, TaskType
 from app.db.errors import violated_constraint
-from app.repositories.model_repository import ModelRepository
+from app.repositories.model_repository import ListPosition, ModelRepository
 from app.services.requester import Requester
 
 ACTIVE_NAME_CONSTRAINT = "uq_models_organization_id_name_active"
 UPDATABLE_FIELDS = frozenset({"name", "description", "task_type"})
+
+
+@dataclass(frozen=True, slots=True)
+class ModelPage:
+    """목록 한 페이지. next_position이 None이면 마지막 페이지다."""
+
+    items: Sequence[Row[Any]]
+    next_position: ListPosition | None
 
 
 class ModelService:
@@ -50,6 +60,25 @@ class ModelService:
     def get(self, requester: Requester, model_id: uuid.UUID) -> MLModel:
         with self._session.begin():
             return self._get_active(requester, model_id)
+
+    def list_page(
+        self,
+        requester: Requester,
+        *,
+        status: ModelStatusFilter,
+        limit: int,
+        after: ListPosition | None,
+    ) -> ModelPage:
+        # 한 건을 더 읽어 다음 페이지가 있는지 판단한다. 전체 건수(COUNT)는 세지 않는다.
+        with self._session.begin():
+            rows = self._models.list_page(
+                requester.organization_id, status=status, limit=limit + 1, after=after
+            )
+        if len(rows) <= limit:
+            return ModelPage(items=rows, next_position=None)
+        items = rows[:limit]
+        last = items[-1]
+        return ModelPage(items=items, next_position=(last.created_at, last.id))
 
     def update(self, requester: Requester, model_id: uuid.UUID, changes: dict[str, Any]) -> MLModel:
         """`changes`에는 클라이언트가 실제로 보낸 필드만 담는다 (JSON Merge Patch)."""
@@ -82,10 +111,34 @@ class ModelService:
             self._models.flush()
         return model
 
+    def restore(self, requester: Requester, model_id: uuid.UUID) -> MLModel:
+        """복원 기한(purge_at) 전의 삭제된 모델을 되살린다.
+
+        기한이 지난 모델은 영구 삭제 대기 중일 뿐 삭제가 확정되었으므로 복원하지 않는다 (ADR 0005).
+        같은 이름의 활성 모델이 있으면 이름을 바꾸지 않고 충돌로 알린다 (ADR 0009).
+        """
+        with _translate_name_conflict(), self._session.begin():
+            model = self._models.get(
+                requester.organization_id, model_id, include_deleted=True, for_update=True
+            )
+            if model is None:
+                raise AppError(ErrorCode.MODEL_NOT_FOUND)
+            if model.deleted_at is None or model.purge_at is None:
+                raise AppError(ErrorCode.MODEL_NOT_DELETED)
+            if model.purge_at <= self._models.current_timestamp():
+                raise AppError(ErrorCode.MODEL_PURGED)
+
+            model.deleted_at = None
+            model.purge_at = None
+            self._touch(model)
+            # 활성 이름 unique 인덱스 위반은 여기서 드러난다.
+            self._models.flush()
+        return model
+
     def _get_active(
         self, requester: Requester, model_id: uuid.UUID, *, for_update: bool = False
     ) -> MLModel:
-        model = self._models.get_active(requester.organization_id, model_id, for_update=for_update)
+        model = self._models.get(requester.organization_id, model_id, for_update=for_update)
         if model is None:
             raise AppError(ErrorCode.MODEL_NOT_FOUND)
         return model

@@ -113,3 +113,31 @@ class ModelDeletedResponse(BaseModel):
     id: uuid.UUID
     deleted_at: UtcDatetime
     purge_at: UtcDatetime = Field(description="이 시각까지 복원할 수 있다. 이후 영구 삭제된다.")
+
+
+class ModelListItem(BaseModel):
+    """목록 항목. 버전 목록 대신 버전 집계만 담는다."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    organization_id: uuid.UUID = Field(description="모델을 소유한 조직")
+    created_by: uuid.UUID = Field(description="모델을 만든 사용자")
+    name: str
+    task_type: TaskType
+    description: str | None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+    deleted_at: UtcDatetime | None = Field(description="삭제 시각. 활성 모델은 null")
+    purge_at: UtcDatetime | None = Field(
+        description="이 시각까지 복원할 수 있다. 이후 영구 삭제된다. 활성 모델은 null"
+    )
+    version_count: int = Field(description="버전 수 (모든 상태 포함)")
+    latest_version_no: int | None = Field(description="가장 최근 버전 번호. 버전이 없으면 null")
+
+
+class ModelListResponse(BaseModel):
+    items: list[ModelListItem]
+    next_cursor: str | None = Field(
+        description="다음 페이지 커서. 그대로 `cursor`에 넣어 요청한다. 마지막 페이지면 null"
+    )

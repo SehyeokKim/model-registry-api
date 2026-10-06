@@ -58,6 +58,17 @@ class TestOpenApi:
                 "503",
             },
             ("/api/v1/models/{model_id}", "delete"): {"200", "401", "403", "404", "422", "503"},
+            ("/api/v1/models", "get"): {"200", "401", "403", "422", "503"},
+            ("/api/v1/models/{model_id}/restore", "post"): {
+                "200",
+                "401",
+                "403",
+                "404",
+                "409",
+                "410",
+                "422",
+                "503",
+            },
         }
         for (path, method), statuses in expected.items():
             operation = paths[path][method]
@@ -69,3 +80,12 @@ class TestOpenApi:
 
         examples = patch["responses"]["409"]["content"]["application/json"]["examples"]
         assert set(examples) == {"MODEL_NAME_CONFLICT", "TASK_TYPE_LOCKED"}
+
+    def test_list_status_filter_is_documented_as_enum(self, client: TestClient) -> None:
+        schema = client.get("/openapi.json").json()
+        operation = schema["paths"]["/api/v1/models"]["get"]
+
+        status = next(p for p in operation["parameters"] if p["name"] == "status")["schema"]
+        enum_name = status["$ref"].rsplit("/", 1)[-1]
+        assert schema["components"]["schemas"][enum_name]["enum"] == ["active", "deleted", "all"]
+        assert status["default"] == "active"

@@ -114,6 +114,12 @@ jobs:
             | jq -e '.name == "ci-smoke" and .versions == []'
           curl --fail --silent --show-error -X DELETE "$API/$model_id" -H "X-User-Id: $DEMO_USER" \
             | jq -e '.purge_at != null'
+          curl --fail --silent --show-error "$API?status=deleted" -H "X-User-Id: $DEMO_USER" \
+            | jq -e --arg id "$model_id" '[.items[].id] == [$id]'
+          curl --fail --silent --show-error -X POST "$API/$model_id/restore" \
+            -H "X-User-Id: $DEMO_USER" | jq -e '.name == "ci-smoke"'
+          curl --fail --silent --show-error "$API" -H "X-User-Id: $DEMO_USER" \
+            | jq -e --arg id "$model_id" '[.items[].id] == [$id] and .next_cursor == null'
 
       - name: Check idempotent restart
         run: |

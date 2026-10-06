@@ -1,18 +1,24 @@
-"""모델 API (Core CRUD)."""
+"""모델 API (생성, 조회, 수정, 삭제, 목록, 복원)."""
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Query, Request, Response, status
 
 from app.api.deps import CustomerDep, ModelServiceDep
 from app.core.errors import ErrorCode
+from app.core.exceptions import AppError
+from app.db.entities import ModelStatusFilter
 from app.schemas.error import error_responses
 from app.schemas.model import (
     ModelCreateRequest,
     ModelDeletedResponse,
     ModelDetailResponse,
+    ModelListItem,
+    ModelListResponse,
     ModelUpdateRequest,
 )
+from app.schemas.pagination import InvalidCursorError, decode_cursor, encode_cursor
 
 router = APIRouter(prefix="/models", tags=["Models"])
 
@@ -50,6 +56,56 @@ def create_model(
     )
     response.headers["Location"] = request.url_for("get_model", model_id=model.id).path
     return ModelDetailResponse.model_validate(model)
+
+
+@router.get(
+    "",
+    response_model=ModelListResponse,
+    summary="모델 목록 조회",
+    description=(
+        "요청자 조직의 모델을 최근 생성 순으로 조회한다. "
+        "각 항목에는 버전 수와 최신 버전 번호를 담는다.\n\n"
+        "- `status`: `active`(기본값), `deleted`(복원할 수 있는 삭제 모델, 휴지통 화면용), "
+        "`all`(둘 다)\n"
+        "- 복원 기한(`purge_at`)이 지난 모델은 삭제가 확정된 것으로 보고 "
+        "어느 범위에도 넣지 않는다.\n"
+        "- 커서 페이지네이션: 응답의 `next_cursor`를 다음 요청의 `cursor`에 그대로 넣는다. "
+        "`next_cursor`가 null이면 마지막 페이지다. 커서는 같은 `status`로만 이어서 쓴다."
+    ),
+    responses=error_responses(*_COMMON_ERRORS),
+)
+def list_models(
+    requester: CustomerDep,
+    service: ModelServiceDep,
+    status_filter: Annotated[
+        ModelStatusFilter, Query(alias="status", description="조회 범위")
+    ] = ModelStatusFilter.ACTIVE,
+    limit: Annotated[int, Query(ge=1, le=100, description="페이지 크기")] = 20,
+    cursor: Annotated[
+        str | None, Query(description="이전 응답의 `next_cursor`. 첫 페이지는 생략")
+    ] = None,
+) -> ModelListResponse:
+    after = None
+    if cursor is not None:
+        try:
+            after = decode_cursor(cursor)
+        except InvalidCursorError:
+            raise AppError(
+                ErrorCode.VALIDATION_ERROR,
+                details=[
+                    {
+                        "location": ["query", "cursor"],
+                        "message": "Invalid cursor",
+                        "type": "value_error",
+                    }
+                ],
+            ) from None
+
+    page = service.list_page(requester, status=status_filter, limit=limit, after=after)
+    return ModelListResponse(
+        items=[ModelListItem.model_validate(row) for row in page.items],
+        next_cursor=encode_cursor(*page.next_position) if page.next_position else None,
+    )
 
 
 @router.get(
@@ -112,3 +168,29 @@ def delete_model(
     model_id: uuid.UUID, requester: CustomerDep, service: ModelServiceDep
 ) -> ModelDeletedResponse:
     return ModelDeletedResponse.model_validate(service.delete(requester, model_id))
+
+
+@router.post(
+    "/{model_id}/restore",
+    response_model=ModelDetailResponse,
+    summary="삭제된 모델 복원",
+    description=(
+        "복원 기한(`purge_at`) 전의 삭제된 모델을 되살린다. "
+        "버전 목록도 삭제 전 그대로 돌아온다.\n\n"
+        "- 복원 기한이 지난 모델은 영구 삭제 대기 중이며 복원할 수 없다(`MODEL_PURGED`). "
+        "영구 삭제된 뒤에는 `MODEL_NOT_FOUND`다.\n"
+        "- 그사이 같은 이름의 활성 모델이 생겼으면 `MODEL_NAME_CONFLICT`다. "
+        "기존 모델의 이름을 바꾼 뒤 다시 요청한다."
+    ),
+    responses=error_responses(
+        *_COMMON_ERRORS,
+        ErrorCode.MODEL_NOT_FOUND,
+        ErrorCode.MODEL_NOT_DELETED,
+        ErrorCode.MODEL_NAME_CONFLICT,
+        ErrorCode.MODEL_PURGED,
+    ),
+)
+def restore_model(
+    model_id: uuid.UUID, requester: CustomerDep, service: ModelServiceDep
+) -> ModelDetailResponse:
+    return ModelDetailResponse.model_validate(service.restore(requester, model_id))
