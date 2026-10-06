@@ -2,16 +2,25 @@
 
 import json
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
+from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 from app.db.entities import ModelVersionStatus
 from app.schemas.common import UtcDatetime
 
 FRAMEWORK_MAX_LENGTH = 50
+ARTIFACT_URI_MAX_LENGTH = 2048
 # 스키마 문서 하나의 최대 크기(JSON 직렬화 기준). 버전은 불변이라 저장된 문서가 끝까지 남고,
 # 추론 게이트웨이와 클라이언트도 이 문서를 읽으므로 비정상적으로 큰 문서를 막는다.
 JSON_SCHEMA_MAX_BYTES = 64 * 1024
@@ -40,6 +49,15 @@ def _check_json_schema(value: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _strip(value: Any) -> Any:
     return value.strip() if isinstance(value, str) else value
+
+
+def _check_absolute_uri(value: str | None) -> str | None:
+    if value is None:
+        return None
+    parts = urlsplit(value)
+    if not parts.scheme or not parts.netloc or any(c.isspace() for c in value):
+        raise ValueError("artifact_uri must be an absolute URI such as s3://bucket/path/")
+    return value
 
 
 JsonSchemaDocument = Annotated[
@@ -104,3 +122,45 @@ class ModelVersionResponse(BaseModel):
     output_schema: dict[str, Any] | None
     created_by: uuid.UUID = Field(description="버전을 만든 사용자")
     created_at: UtcDatetime
+
+
+class ModelVersionStatusUpdateRequest(BaseModel):
+    """버전 상태 변경 요청. `READY`로 바꿀 때만 `artifact_uri`를 받는다."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {"status": "TRAINING"},
+                {
+                    "status": "READY",
+                    "artifact_uri": (
+                        "s3://model-artifacts/models/<model_id>/versions/<version_id>/model.tar.gz"
+                    ),
+                },
+            ]
+        },
+    )
+
+    status: ModelVersionStatus = Field(description="바꿀 상태")
+    artifact_uri: Annotated[
+        str | None,
+        BeforeValidator(_strip),
+        Field(min_length=1, max_length=ARTIFACT_URI_MAX_LENGTH),
+        AfterValidator(_check_absolute_uri),
+    ] = Field(
+        default=None,
+        description=(
+            "학습 결과 아티팩트 위치. `READY`로 바꿀 때 필수이고 다른 상태에서는 보낼 수 없다. "
+            "스킴이 있는 절대 URI이며, 경로에 "
+            "`models/{model_id}/versions/{version_id}/`가 있어야 한다."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _artifact_uri_only_for_ready(self) -> Self:
+        if self.status == ModelVersionStatus.READY and self.artifact_uri is None:
+            raise ValueError("artifact_uri is required when status is READY")
+        if self.status != ModelVersionStatus.READY and self.artifact_uri is not None:
+            raise ValueError("artifact_uri can only be set when status is READY")
+        return self

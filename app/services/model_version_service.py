@@ -1,9 +1,11 @@
 """모델 버전 유스케이스. 유스케이스 하나가 트랜잭션 하나다."""
 
+import logging
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,6 +20,17 @@ from app.services.model_service import get_active_model, touch_model
 from app.services.requester import Requester
 
 VERSION_NO_CONSTRAINT = "uq_model_versions_model_id_version_no"
+
+# 허용하는 상태 전이. FAILED, ARCHIVED는 최종 상태이며, 다시 학습하려면 새 버전을 만든다.
+ALLOWED_TRANSITIONS: dict[ModelVersionStatus, frozenset[ModelVersionStatus]] = {
+    ModelVersionStatus.PENDING: frozenset({ModelVersionStatus.TRAINING, ModelVersionStatus.FAILED}),
+    ModelVersionStatus.TRAINING: frozenset({ModelVersionStatus.READY, ModelVersionStatus.FAILED}),
+    ModelVersionStatus.READY: frozenset({ModelVersionStatus.ARCHIVED}),
+    ModelVersionStatus.FAILED: frozenset(),
+    ModelVersionStatus.ARCHIVED: frozenset(),
+}
+
+logger = logging.getLogger(__name__)
 
 
 class ModelVersionService:
@@ -66,6 +79,84 @@ class ModelVersionService:
             touch_model(self._models, model)
             self._models.flush()
         return version
+
+    def change_status(
+        self,
+        version_id: uuid.UUID,
+        *,
+        status: ModelVersionStatus,
+        artifact_uri: str | None,
+    ) -> MLModelVersion:
+        """학습 파이프라인이 버전 상태를 바꾼다 (내부 API, 조직 범위 제한 없음).
+
+        소프트 삭제된 모델의 버전도 바꿀 수 있다. 삭제 전에 시작한 학습 결과를 기록해야 복원 후
+        상태가 정확하다. 복원 기한이 지난 모델은 영구 삭제된 것으로 보고 버전도 없는 것으로 다룬다.
+        """
+        with self._session.begin():
+            owner = self._versions.get_owner(version_id)
+            if owner is None:
+                raise AppError(ErrorCode.MODEL_VERSION_NOT_FOUND)
+            model_id, organization_id = owner
+            # 버전 상태도 모델 단건 응답에 포함되므로 다른 쓰기와 같은 모델 행 잠금으로 직렬화한다.
+            model = self._models.get(
+                organization_id,
+                model_id,
+                include_deleted=True,
+                for_update=True,
+                load_versions=False,
+            )
+            now = self._models.current_timestamp()
+            if model is None or (model.purge_at is not None and model.purge_at <= now):
+                raise AppError(ErrorCode.MODEL_VERSION_NOT_FOUND)
+            # 잠금을 잡은 뒤 읽어야 동시에 들어온 다른 전이의 결과를 본다.
+            version = self._versions.get_in_model(model_id, version_id, with_schemas=True)
+            if version is None:
+                raise AppError(ErrorCode.MODEL_VERSION_NOT_FOUND)
+
+            previous = version.status
+            if status not in ALLOWED_TRANSITIONS[previous]:
+                raise AppError(
+                    ErrorCode.INVALID_STATUS_TRANSITION,
+                    f"Cannot change status from {previous} to {status}.",
+                )
+            if artifact_uri is not None:
+                _check_artifact_path(artifact_uri, model_id, version_id)
+                version.artifact_uri = artifact_uri
+            version.status = status
+            touch_model(self._models, model)
+            self._models.flush()
+
+        logger.info(
+            "Model version status changed",
+            extra={
+                "model_id": str(model_id),
+                "version_id": str(version_id),
+                "from_status": previous.value,
+                "to_status": status.value,
+            },
+        )
+        return version
+
+
+def _check_artifact_path(artifact_uri: str, model_id: uuid.UUID, version_id: uuid.UUID) -> None:
+    """아티팩트 경로는 버전 UUID로만 만든다 (ADR 0003).
+
+    경로에 models/{model_id}/versions/{version_id}/가 있어야 다른 버전의 아티팩트를 덮어쓰지 않고,
+    영구 삭제 때 모델 ID로 아티팩트를 빠짐없이 찾아 파기할 수 있다 (ADR 0005).
+    버킷과 스킴은 제한하지 않는다.
+    """
+    expected = f"/models/{model_id}/versions/{version_id}/"
+    if expected not in urlsplit(artifact_uri).path:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            details=[
+                {
+                    "location": ["body", "artifact_uri"],
+                    "message": f"artifact_uri path must contain '{expected.lstrip('/')}'",
+                    "type": "value_error",
+                }
+            ],
+        )
 
 
 @contextmanager

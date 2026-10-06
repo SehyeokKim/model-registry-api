@@ -7,9 +7,9 @@
 import uuid
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
-from app.db.entities import MLModelVersion
+from app.db.entities import MLModel, MLModelVersion
 
 
 class ModelVersionRepository:
@@ -31,10 +31,30 @@ class ModelVersionRepository:
         )
         return self._session.execute(statement).scalar_one()
 
-    def get_in_model(self, model_id: uuid.UUID, version_id: uuid.UUID) -> MLModelVersion | None:
-        """모델에 속한 버전. 다른 모델의 버전 ID면 None이다."""
-        return self._session.scalar(
-            select(MLModelVersion).where(
-                MLModelVersion.id == version_id, MLModelVersion.model_id == model_id
-            )
+    def get_in_model(
+        self, model_id: uuid.UUID, version_id: uuid.UUID, *, with_schemas: bool = False
+    ) -> MLModelVersion | None:
+        """모델에 속한 버전. 다른 모델의 버전 ID면 None이다.
+
+        입출력 스키마는 기본으로 읽지 않는다. 응답에 담아야 할 때만 with_schemas=True로 읽는다.
+        """
+        statement = select(MLModelVersion).where(
+            MLModelVersion.id == version_id, MLModelVersion.model_id == model_id
         )
+        if with_schemas:
+            statement = statement.options(
+                undefer(MLModelVersion.input_schema), undefer(MLModelVersion.output_schema)
+            )
+        return self._session.scalar(statement)
+
+    def get_owner(self, version_id: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID] | None:
+        """버전이 속한 (model_id, organization_id). 내부 API가 모델을 조직 범위로 잠그기 전에 쓴다.
+
+        조직 조건 없이 모델을 조회하는 함수를 따로 두지 않기 위해, 소유 조직만 먼저 찾는다.
+        """
+        row = self._session.execute(
+            select(MLModelVersion.model_id, MLModel.organization_id)
+            .join(MLModel, MLModel.id == MLModelVersion.model_id)
+            .where(MLModelVersion.id == version_id)
+        ).one_or_none()
+        return None if row is None else (row.model_id, row.organization_id)

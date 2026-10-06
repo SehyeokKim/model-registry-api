@@ -69,6 +69,15 @@ class TestOpenApi:
                 "422",
                 "503",
             },
+            ("/internal/v1/model-versions/{version_id}/status", "patch"): {
+                "200",
+                "401",
+                "403",
+                "404",
+                "409",
+                "422",
+                "503",
+            },
             ("/api/v1/models/{model_id}/versions", "post"): {
                 "201",
                 "401",
@@ -98,3 +107,11 @@ class TestOpenApi:
         enum_name = status["$ref"].rsplit("/", 1)[-1]
         assert schema["components"]["schemas"][enum_name]["enum"] == ["active", "deleted", "all"]
         assert status["default"] == "active"
+
+
+def test_internal_api_is_tagged_separately(client: TestClient) -> None:
+    schema = client.get("/openapi.json").json()
+
+    operation = schema["paths"]["/internal/v1/model-versions/{version_id}/status"]["patch"]
+    assert operation["tags"] == ["Internal"]
+    assert "Internal" in {tag["name"] for tag in schema["tags"]}

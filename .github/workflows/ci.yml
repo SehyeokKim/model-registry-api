@@ -120,12 +120,33 @@ jobs:
             -H "X-User-Id: $DEMO_USER" | jq -e '.name == "ci-smoke"'
           curl --fail --silent --show-error "$API" -H "X-User-Id: $DEMO_USER" \
             | jq -e --arg id "$model_id" '[.items[].id] == [$id] and .next_cursor == null'
-          curl --fail --silent --show-error -X POST "$API/$model_id/versions" \
+          version=$(curl --fail --silent --show-error -X POST "$API/$model_id/versions" \
             -H "X-User-Id: $DEMO_USER" -H "Content-Type: application/json" \
-            -d '{"input_schema": {"type": "object"}}' \
-            | jq -e '.version_no == 1 and .status == "PENDING"'
+            -d '{"input_schema": {"type": "object"}}')
+          echo "$version" | jq -e '.version_no == 1 and .status == "PENDING"'
+          echo "version_id=$(echo "$version" | jq -r .id)" >> "$GITHUB_ENV"
+          echo "model_id=$model_id" >> "$GITHUB_ENV"
           curl --fail --silent --show-error "$API" -H "X-User-Id: $DEMO_USER" \
             | jq -e '.items[0].version_count == 1 and .items[0].latest_version_no == 1'
+
+      - name: Call internal API as ML engineer
+        env:
+          INTERNAL: http://localhost:8000/internal/v1/model-versions
+          DEMO_USER: 00000000-0000-0000-0000-000000000001
+          ML_ENGINEER: 00000000-0000-0000-0000-000000000004
+        run: |
+          status_url="$INTERNAL/$version_id/status"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -X PATCH "$status_url" \
+            -H "X-User-Id: $DEMO_USER" -H "Content-Type: application/json" \
+            -d '{"status": "TRAINING"}')" = "403"
+          curl --fail --silent --show-error -X PATCH "$status_url" \
+            -H "X-User-Id: $ML_ENGINEER" -H "Content-Type: application/json" \
+            -d '{"status": "TRAINING"}' | jq -e '.status == "TRAINING"'
+          uri="s3://model-artifacts/models/$model_id/versions/$version_id/model.tar.gz"
+          curl --fail --silent --show-error -X PATCH "$status_url" \
+            -H "X-User-Id: $ML_ENGINEER" -H "Content-Type: application/json" \
+            -d "{\"status\": \"READY\", \"artifact_uri\": \"$uri\"}" \
+            | jq -e --arg uri "$uri" '.status == "READY" and .artifact_uri == $uri'
 
       - name: Check idempotent restart
         run: |

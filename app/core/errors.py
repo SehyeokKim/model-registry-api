@@ -23,6 +23,8 @@ class ErrorCode(StrEnum):
     MODEL_PURGED = "MODEL_PURGED"
     INVALID_PARENT_VERSION = "INVALID_PARENT_VERSION"
     MODEL_VERSION_CONFLICT = "MODEL_VERSION_CONFLICT"
+    MODEL_VERSION_NOT_FOUND = "MODEL_VERSION_NOT_FOUND"
+    INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
     EMPTY_UPDATE = "EMPTY_UPDATE"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -44,7 +46,7 @@ ERROR_CATALOG: dict[ErrorCode, ErrorSpec] = {
     ),
     ErrorCode.FORBIDDEN: ErrorSpec(
         403,
-        "조직에 속하지 않은 내부 사용자가 고객 API를 호출",
+        "조직에 속하지 않은 내부 사용자가 고객 API를 호출하거나, 고객이 내부 API를 호출",
         "This user is not allowed to call this API.",
     ),
     ErrorCode.BAD_REQUEST: ErrorSpec(
@@ -89,6 +91,16 @@ ERROR_CATALOG: dict[ErrorCode, ErrorSpec] = {
         409,
         "버전 번호가 동시에 생성된 다른 버전과 겹침 (다시 시도하면 된다)",
         "A version with the same number was created concurrently. Retry the request.",
+    ),
+    ErrorCode.MODEL_VERSION_NOT_FOUND: ErrorSpec(
+        404,
+        "내부 API에서 버전이 없거나, 소속 모델이 영구 삭제됨 (복원 기한 경과 포함)",
+        "Model version not found.",
+    ),
+    ErrorCode.INVALID_STATUS_TRANSITION: ErrorSpec(
+        409,
+        "허용되지 않은 버전 상태 전이 (같은 상태로의 전이 포함)",
+        "The status transition is not allowed.",
     ),
     ErrorCode.EMPTY_UPDATE: ErrorSpec(
         422, "변경할 필드가 없는 수정 요청(`{}`)", "At least one field must be provided."

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api import health
+from app.api.internal import internal_router
 from app.api.v1 import api_router
 from app.core.config import Settings, get_settings
 from app.core.exception_handlers import register_exception_handlers
@@ -25,7 +26,7 @@ AutoML 플랫폼의 모델 관리 API. 고객 조직의 모델과 모델 버전�
 | 조직 A 고객 1 | `00000000-0000-0000-0000-000000000001` | 기본 사용자 |
 | 조직 A 고객 2 | `00000000-0000-0000-0000-000000000002` | 같은 조직의 모델 공유 |
 | 조직 B 고객 | `00000000-0000-0000-0000-000000000003` | 다른 조직의 모델은 404 |
-| ML Engineer (내부) | `00000000-0000-0000-0000-000000000004` | 고객 API는 403 |
+| ML Engineer (내부) | `00000000-0000-0000-0000-000000000004` | 내부 API 호출, 고객 API는 403 |
 
 ## 공통 규칙
 - 에러 응답은 `{"error": {"code", "message", "details"}}` 형식이다. 클라이언트는 `code`로 분기한다.
@@ -36,6 +37,13 @@ AutoML 플랫폼의 모델 관리 API. 고객 조직의 모델과 모델 버전�
 OPENAPI_TAGS = [
     {"name": "Models", "description": "모델 생명주기 (생성, 조회, 수정, 소프트 삭제, 목록, 복원)"},
     {"name": "Model Versions", "description": "모델 버전 (학습 결과물 단위, 생성 후 불변)"},
+    {
+        "name": "Internal",
+        "description": (
+            "학습 파이프라인용 내부 API. 운영에서는 API Gateway에 노출하지 않고 "
+            "클러스터 내부에서만 호출한다. 내부 사용자(ML Engineer, 관리자)만 호출할 수 있다."
+        ),
+    },
     {"name": "Health", "description": "운영 엔드포인트 (Kubernetes probe, compose healthcheck)"},
 ]
 
@@ -65,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     app.include_router(api_router)
+    app.include_router(internal_router)
     app.include_router(health.router)
     return app
 

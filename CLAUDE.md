@@ -118,7 +118,7 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 | `NOT_FOUND` | 404 | 정의되지 않은 경로 |
 | `METHOD_NOT_ALLOWED` | 405 | 경로가 지원하지 않는 HTTP 메서드 (`Allow` 헤더 포함) |
 | `MODEL_NOT_FOUND` | 404 | 모델이 없음, 삭제됨(조회/수정/삭제/버전 생성), 다른 조직 소유, 영구 삭제됨 |
-| `MODEL_VERSION_NOT_FOUND` | 404 | 내부 API에서 버전이 없거나, 모델이 영구 삭제됨 |
+| `MODEL_VERSION_NOT_FOUND` | 404 | 내부 API에서 버전이 없거나, 모델이 영구 삭제됨 (복원 기한 경과 포함) |
 | `INVALID_STATUS_TRANSITION` | 409 | 허용되지 않은 버전 상태 전이 (같은 상태로의 전이 포함) |
 | `PRECONDITION_FAILED` | 412 | `If-Match`의 ETag가 현재 모델 상태와 다름. 응답에 현재 `ETag` 헤더 포함 |
 | `MODEL_NAME_CONFLICT` | 409 | 생성, 이름 수정, 복원 시 같은 조직의 활성 모델 이름과 중복 |
@@ -151,6 +151,7 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
   - 삭제 응답은 200과 `{"id", "deleted_at", "purge_at"}`이다. 클라이언트가 복원 기한을 사용자에게 알려줄 수 있게 하기 위해서다.
 - 삭제된 모델은 조회, 수정 대상에서 제외된다 (404). 복원만 가능하다.
 - `purge_at`이 지난 모델은 복원할 수 없다 (410 `MODEL_PURGED`). 영구 삭제된 뒤에는 404다.
+- **복원 기한이 지나면 그 즉시 영구 삭제된 것으로 본다. 유예 상태는 없다.** 영구 삭제 배치가 아직 돌지 않아 행이 남아 있어도 모든 API에서 영구 삭제된 모델과 같게 다룬다 (목록에서 제외, 내부 API 404). 판단 기준은 DB 시각 `purge_at <= now()`다. 복원 요청만 410 `MODEL_PURGED`로 "영구히 없어졌음"을 알린다 (ADR 0009).
 - 복원 시 같은 이름의 활성 모델이 있으면 409를 반환한다.
 - `purge_at`이 지난 모델은 `scripts/purge_expired_models.py`가 배치 단위로 영구 삭제하고, `model_versions`는 FK `ON DELETE CASCADE`로 함께 삭제된다 (ADR 0005).
 - 인증은 이 서비스 범위 밖이다 (API Gateway에서 처리한다고 가정). 요청자는 `X-User-Id` 헤더로 식별한다.
@@ -190,7 +191,9 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 - `FAILED`, `ARCHIVED`는 최종 상태다. 다시 학습하려면 새 버전을 만든다 (버전은 불변).
 - `artifact_uri`는 `READY`로 전이할 때만 받는다. 다른 전이에서 보내면 422.
 - 모델 행을 `FOR NO KEY UPDATE`로 잠근 뒤 버전 상태를 바꾼다 (ADR 0003). 버전 상태도 모델 단건 응답에 포함되므로 모델의 `row_version`도 올린다 (ADR 0007).
-- 소프트 삭제된 모델의 버전도 상태를 바꿀 수 있다. 삭제 전에 시작한 학습이 끝나면 결과를 기록해야 복원 후 상태가 정확하다. 영구 삭제된 뒤에는 404 `MODEL_VERSION_NOT_FOUND`.
+- 소프트 삭제된 모델의 버전도 상태를 바꿀 수 있다. 삭제 전에 시작한 학습이 끝나면 결과를 기록해야 복원 후 상태가 정확하다. 영구 삭제된 뒤(복원 기한 경과 포함)에는 404 `MODEL_VERSION_NOT_FOUND`.
+- `artifact_uri`는 스킴이 있는 절대 URI(최대 2048자)이고, 경로에 `models/{model_id}/versions/{version_id}/`가 있어야 한다. 아니면 422 `VALIDATION_ERROR`.
+  - 이유: 아티팩트 경로를 UUID로만 만드는 규칙(덮어쓰기 방지)을 API에서 보장하고, 영구 삭제 시 모델 ID로 아티팩트를 빠짐없이 찾아 파기할 수 있게 한다 (ADR 0005). 버킷과 스킴은 제한하지 않는다.
 
 ### 동시 수정 방지 (ETag, ADR 0007)
 - 같은 조직의 여러 사용자가 같은 모델을 동시에 고칠 때, 다른 사람의 수정을 모르고 덮어쓰는 일(lost update)을 막는다.

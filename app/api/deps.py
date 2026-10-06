@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import ErrorCode
 from app.core.exceptions import AppError
 from app.core.request_context import current_context
-from app.db.entities import User
+from app.db.entities import User, UserRole
 from app.repositories.user_repository import UserRepository
 from app.services.model_service import ModelService
 from app.services.model_version_service import ModelVersionService
@@ -71,6 +71,21 @@ def get_customer(user: Annotated[User, Depends(get_current_user)]) -> Requester:
 
 
 CustomerDep = Annotated[Requester, Depends(get_customer)]
+
+INTERNAL_ROLES = frozenset({UserRole.ML_ENGINEER, UserRole.ADMIN})
+
+
+def get_internal_user(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """내부 API(/internal/v1)는 내부 사용자만 호출할 수 있다. 조직 범위 제한은 없다 (ADR 0006).
+
+    고객이 학습 결과를 임의로 READY로 바꾸지 못하게 한다.
+    """
+    if user.role not in INTERNAL_ROLES:
+        raise AppError(ErrorCode.FORBIDDEN, "Only internal users can call the internal API.")
+    return user
+
+
+InternalUserDep = Annotated[User, Depends(get_internal_user)]
 
 
 def get_model_service(request: Request, session: SessionDep) -> ModelService:
