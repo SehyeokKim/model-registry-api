@@ -16,16 +16,17 @@ AutoML 플랫폼 전체 데이터 모델. 이 저장소는 이 중 `organization
 |---|---|---|
 | 조직 | organizations | 고객사(테넌트). 데이터셋과 모델의 소유 단위, 내부 분석 동의 여부 |
 | 사용자 | users | 고객/내부 사용자, role로 구분. 고객은 조직 하나에 속함 |
-| 데이터 | datasets | 데이터셋 이름표, 소프트 삭제 + 복원 기한 |
-| 데이터 | dataset_versions | 업로드 파일 1건, 원본 URI, Parquet 매니페스트 URI, 크기, 체크섬, 업로드 상태 |
-| 데이터 | dataset_columns | 버전별 컬럼명, 타입 |
+| 데이터 | datasets | 데이터셋 이름표, 소프트 삭제 + 복원 기한, 낙관적 잠금(row_version) |
+| 데이터 | dataset_versions | 업로드 파일 1건, 원래 파일명, 원본 URI, Parquet 매니페스트 URI, 크기, 체크섬, 업로드 상태 |
+| 데이터 | dataset_columns | 버전별 컬럼명, 타입, 낮은 카디널리티 컬럼의 고유값 목록 |
 | 모델 | models | 모델 이름표, 소프트 삭제 + 복원 기한 |
 | 모델 | model_versions | 학습 결과물 v1, v2…, 부모 버전, 입출력 스키마, 아티팩트 URI |
 | 모델 | model_version_datasets | 버전 ↔ 데이터 버전 N:M (학습 데이터 계보) |
 | 모델 | model_metrics | 성능 지표 (행 단위, 버전 간 비교 용이) |
-| 학습 | training_jobs | 학습 작업 (버전과 1:1), 상태, 학습 이미지 digest, GPU, K8s Job, 체크포인트, 재시도 |
+| 학습 | training_jobs | 학습 작업 (버전당 최대 1개, 학습 없이 등록한 버전에는 없음), 상태, 학습 이미지 digest, GPU, K8s Job, 체크포인트, 재시도 |
 | 학습 | training_job_events | 학습 상태 변경 이력 |
 | 서빙 | deployments | 모델별 엔드포인트, active_version_id 교체로 배포/롤백, 공유 서버 풀/전용 서버 구분 |
+| 메시징 | outbox_events | 업무 데이터와 같은 트랜잭션에 기록하는 이벤트, Outbox Relay가 SQS로 전달 |
 
 ## 다이어그램
 
@@ -43,7 +44,7 @@ erDiagram
     model_versions ||--o{ model_versions : "derived_from"
     model_versions ||--|{ model_version_datasets : "trained_on"
     dataset_versions ||--o{ model_version_datasets : "used_in"
-    model_versions ||--|| training_jobs : "produced_by"
+    model_versions ||--o| training_jobs : "produced_by"
     training_jobs ||--o{ training_job_events : logs
     model_versions ||--o{ model_metrics : has
     models ||--o| deployments : "served_by"
@@ -73,6 +74,7 @@ erDiagram
         timestamptz updated_at
         timestamptz deleted_at
         timestamptz purge_at
+        int row_version "ETag, 낙관적 잠금"
     }
     dataset_versions {
         uuid id PK
@@ -81,6 +83,7 @@ erDiagram
         uuid base_version_id FK "nullable"
         string source_type "UPLOAD|APPEND|EDIT"
         string file_format "CSV|XLSX"
+        string original_filename "원래 파일명, 경로에는 쓰지 않음"
         string original_uri "원본은 READY 7일 후 삭제"
         string parquet_uri "Parquet 매니페스트"
         bigint size_bytes
@@ -96,6 +99,7 @@ erDiagram
         string name "UK(dataset_version_id, name)"
         string dtype
         boolean nullable
+        jsonb distinct_values "낮은 카디널리티 컬럼의 고유값 목록, nullable"
     }
     models {
         uuid id PK
@@ -173,5 +177,13 @@ erDiagram
         string serving_mode "SHARED|DEDICATED"
         int replicas "DEDICATED일 때만"
         timestamptz updated_at
+    }
+    outbox_events {
+        bigint id PK
+        string event_type "DatasetVersionUploaded|TrainingRequested"
+        uuid aggregate_id "이벤트 대상(버전) ID"
+        jsonb payload
+        timestamptz created_at
+        timestamptz published_at "nullable, Relay가 전달 후 기록"
     }
 ```
