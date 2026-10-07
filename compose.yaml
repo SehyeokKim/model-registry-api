@@ -29,7 +29,8 @@ services:
       - pgdata:/var/lib/postgresql/data
     # 호스트에 포트를 노출하지 않는다. 로컬 테스트용 노출은 compose.dev.yaml에서만 한다.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # TCP로 확인한다. 첫 초기화 중 임시 서버는 소켓만 열어, 소켓 확인은 준비 전에 통과할 수 있다.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
