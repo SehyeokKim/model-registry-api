@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # 삭제된 모델을 복원할 수 있는 기간(일). purge_at = deleted_at + 이 기간
     model_restore_window_days: int = Field(default=30, ge=1)
 
+    # 영구 삭제 커맨드가 한 트랜잭션에서 지우는 최대 모델 수 (ADR 0005)
+    purge_batch_size: int = Field(default=500, ge=1)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _uppercase_log_level(cls, value: object) -> object:

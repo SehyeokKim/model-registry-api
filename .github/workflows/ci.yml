@@ -165,6 +165,29 @@ jobs:
             -H "Content-Type: application/json" -d '{"description": "fresh"}' \
             | jq -e '.description == "fresh"'
 
+      - name: Run purge command for expired models
+        env:
+          API: http://localhost:8000/api/v1/models
+          DEMO_USER: 00000000-0000-0000-0000-000000000001
+        run: |
+          expired_id=$(curl --fail --silent --show-error -X POST "$API" \
+            -H "X-User-Id: $DEMO_USER" -H "Content-Type: application/json" \
+            -d '{"name": "ci-expired", "task_type": "REGRESSION"}' | jq -r .id)
+          curl --fail --silent --show-error -X DELETE "$API/$expired_id" \
+            -H "X-User-Id: $DEMO_USER" > /dev/null
+          # 복원 기한이 지난 상태로 만든다.
+          docker compose exec -T db psql -U registry -d registry -c \
+            "UPDATE models SET deleted_at = now() - interval '31 days', purge_at = now() - interval '1 day' WHERE id = '$expired_id'"
+          docker compose exec -T api python -m scripts.purge_expired_models --dry-run \
+            | grep '"expired_count": 1'
+          docker compose exec -T api python -m scripts.purge_expired_models \
+            | grep '"deleted_count": 1'
+          count=$(docker compose exec -T db psql -U registry -d registry -tAc \
+            "SELECT count(*) FROM models WHERE id = '$expired_id'")
+          test "$count" = "0"
+          # 활성 모델(ci-smoke)은 남아 있어야 한다.
+          curl --fail --silent --show-error "$API/$model_id" -H "X-User-Id: $DEMO_USER" > /dev/null
+
       - name: Check idempotent restart
         run: |
           docker compose up -d --wait --wait-timeout 180

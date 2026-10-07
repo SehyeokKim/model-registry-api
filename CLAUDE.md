@@ -135,6 +135,7 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 ## 도메인 규칙
 - 모델은 고객 조직이 소유한다 (ADR 0006). 같은 조직의 사용자는 조직의 모든 모델을 다룰 수 있고, 다른 조직의 모델은 404다.
   - 조직 소유 테이블을 다루는 repository 함수는 `organization_id`를 필수 인자로 받는다. 조직 조건 없는 조회 함수를 만들지 않는다.
+  - 예외: 조직을 가로지르는 시스템 배치(복원 기한이 지난 모델 영구 삭제)는 전용 repository(`model_purge_repository.py`)에만 두고, API 경로에서 쓰지 않으며 고객에게 데이터를 돌려주지 않는다.
   - `models.created_by`는 만든 사용자 기록용이며 권한 판단에 쓰지 않는다.
 - 같은 조직 내 활성 모델 이름은 중복될 수 없다 (partial unique index `(organization_id, name) WHERE deleted_at IS NULL`).
 
