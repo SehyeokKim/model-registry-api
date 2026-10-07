@@ -348,7 +348,7 @@ docs/                  ERD, ADR
 
 ## AI 도구 활용 및 검증 방식
 
-이 저장소는 Anthropic의 AI 코딩 도구 **Claude Code**를 활용해 만들었습니다. 요구사항 해석, 설계 결정, 코드 리뷰와 머지는 사람이 하고, 구현과 테스트 작성, 검증 실행은 Claude Code가 했습니다.
+이 저장소는 구현 속도를 높이고 부족한 도메인 지식을 빠르게 익히기 위해 Anthropic의 AI 코딩 도구 **Claude Code**를 활용해 만들었습니다. 요구사항 해석, 설계 결정, 코드 리뷰와 머지, 최종 확인은 사람이 하고, 조사와 구현, 테스트 작성, 검증 실행은 Claude Code가 했습니다.
 
 ### 진행 방식
 - **규칙을 먼저 문서로 고정**: 작업 전에 [CLAUDE.md](CLAUDE.md)(프로젝트 규칙), [CONTRIBUTING.md](CONTRIBUTING.md)(Git 규칙), 초기 ADR을 작성하고, AI가 매 작업마다 이 규칙을 따르게 했습니다.
