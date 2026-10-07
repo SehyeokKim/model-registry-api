@@ -22,7 +22,3 @@ class AppError(Exception):
         self.details = details
         self.headers = headers
         super().__init__(self.message)
-
-    @property
-    def status_code(self) -> int:
-        return ERROR_CATALOG[self.code].status

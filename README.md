@@ -294,14 +294,14 @@ docs/                  ERD, ADR
 
 ## 설계 고려 사항
 
-플랫폼 전체 데이터 모델은 [docs/erd.md](docs/erd.md)에 있고, 이 저장소는 그중 `organizations`, `users`, `models`, `model_versions`를 구현합니다. 주요 결정의 배경, 대안, 트레이드오프는 [docs/adr/](docs/adr/)에 ADR로 남겼습니다.
+플랫폼 전체 데이터 모델은 [docs/erd.md](docs/erd.md)에 있고, 이 저장소는 그중 `organizations`, `users`, `models`, `model_versions`를 구현합니다. `organizations.analytics_consent`(고객 데이터의 내부 분석 동의 여부)는 플랫폼의 분석 환경이 쓰는 컬럼이며, 이 서비스의 API는 아직 읽거나 쓰지 않습니다. 주요 결정의 배경, 대안, 트레이드오프는 [docs/adr/](docs/adr/)에 ADR로 남겼습니다.
 
 ### 도메인과 데이터 모델
 - **조직 단위 소유 (ADR 0006)**: 모델은 사용자 개인이 아니라 고객 조직이 소유합니다. 담당자가 바뀌어도 모델이 남고, 같은 조직 사용자끼리 공유하며, 다른 조직의 모델은 존재 여부도 드러내지 않도록 404로 응답합니다. 조직 소유 테이블의 repository 함수는 `organization_id`를 필수 인자로 받아 조직 조건 누락을 구조적으로 막습니다.
 - **이름표 + 불변 버전**: 모델은 이름표이고, 학습 결과물은 불변인 버전으로 쌓입니다. 재학습의 기준(`parent_version_id`)은 같은 모델의 `READY` 버전만 허용해 계보가 끊기지 않게 합니다.
 - **입출력 스키마 검증**: 버전의 `input_schema`, `output_schema`는 추론 게이트웨이와 클라이언트가 쓰는 계약입니다. 버전은 고칠 수 없으므로 저장 시점에 JSON Schema Draft 2020-12 메타스키마와 크기 상한(64 KiB)으로 검증합니다.
 - **유형 잠금**: 버전이 생긴 뒤에는 `task_type`을 바꿀 수 없습니다. 추론 결과 형식, 성능 지표, 재학습 계보가 모델 정의와 어긋나기 때문입니다.
-- **아티팩트 경로 규칙**: `READY` 전이의 `artifact_uri`는 경로에 `models/{model_id}/versions/{version_id}/`가 있어야 합니다. 다른 버전의 아티팩트를 덮어쓰지 않고, 영구 삭제 때 모델 ID로 아티팩트를 빠짐없이 찾을 수 있게 합니다.
+- **아티팩트 경로 규칙**: `READY` 전이의 `artifact_uri`는 경로의 첫 `models` 세그먼트 바로 뒤가 `{model_id}/versions/{version_id}/`여야 하고, `.`, `..` 세그먼트는 허용하지 않습니다. 다른 버전의 아티팩트를 덮어쓰지 않고, 영구 삭제 때 모델 ID로 아티팩트를 빠짐없이 찾을 수 있게 합니다.
 - **DB 제약을 최종 방어선으로**: 활성 이름 중복(partial unique index), 이름 정규화(NFC CHECK), 소프트 삭제 컬럼 쌍, 같은 모델 안의 부모 버전(복합 FK), `READY` 버전의 아티팩트 필수를 DB 제약으로도 보장합니다.
 
 ### 트랜잭션과 동시성

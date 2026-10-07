@@ -29,7 +29,7 @@ FastAPI는 sync와 async를 모두 지원하므로, DB 접근 계층의 동시�
 
 ## 결정
 
-- SQLAlchemy 2.0 sync 세션과 psycopg 3 드라이버(`postgresql+psycopg`)를 사용한다.
+- SQLAlchemy 2.1 sync 세션(2.0 스타일 API)과 psycopg 3 드라이버(`postgresql+psycopg`)를 사용한다.
 - 엔드포인트는 `def`로 선언하고 FastAPI 스레드풀에서 실행한다.
 - 세션은 요청마다 의존성(`app/api/deps.py`)으로 만들고, 트랜잭션은 service 계층에서 유스케이스 단위로 시작하고 끝낸다.
 

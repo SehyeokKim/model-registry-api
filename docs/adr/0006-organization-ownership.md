@@ -26,13 +26,13 @@
   - `organization_id`: 소유 조직(NOT NULL FK)
   - `created_by`: 만든 사용자(NOT NULL FK). 감사용 기록이며 권한 판단에는 쓰지 않는다.
 - 활성 모델 이름 중복 방지는 조직 단위다: partial unique `(organization_id, name) WHERE deleted_at IS NULL`
-- 목록 조회 인덱스도 조직 기준이다: `(organization_id, created_at DESC, id DESC)`
+- 목록 조회 인덱스도 조직 기준이다: `(organization_id, created_at, id)`. 최신순 조회(`ORDER BY created_at DESC, id DESC`)는 이 인덱스를 역방향으로 읽는다.
 - 이 저장소 범위 밖의 `datasets`도 ERD에서 같은 구조(`organization_id`, `created_by`)로 바꾼다.
 
 ### 접근 규칙
 
 - 요청자는 `X-User-Id`로 식별하고, 그 사용자의 조직을 요청 범위로 삼는다.
-- 같은 조직의 사용자는 조직의 모든 모델을 조회, 수정, 삭제, 복원할 수 있다. 조직 안의 역할 구분(관리자, 일반 사용자)은 이후 과제로 둔다.
+- 같은 조직의 사용자는 조직의 모든 모델을 조회, 수정, 삭제, 복원할 수 있다. 조직 안의 역할 구분(관리자, 일반 사용자)은 이후에 검토한다.
 - 다른 조직의 모델은 존재 여부를 드러내지 않도록 404 `MODEL_NOT_FOUND`로 응답한다.
 - 조직이 없는 내부 사용자가 고객 API(`/api/v1`)를 호출하면 403 `FORBIDDEN`이다.
 - 반대로 내부 API(`/internal/v1`, 버전 상태 변경)는 내부 사용자만 호출할 수 있고 고객은 403이다. 내부 API는 조직 범위 제한이 없다.

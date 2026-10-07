@@ -24,7 +24,6 @@ from app.repositories.model_repository import ListPosition, ModelRepository
 from app.services.requester import Requester
 
 ACTIVE_NAME_CONSTRAINT = "uq_models_organization_id_name_active"
-UPDATABLE_FIELDS = frozenset({"name", "description", "task_type"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,9 +91,6 @@ class ModelService:
         """`changes`에는 클라이언트가 실제로 보낸 필드만 담는다 (JSON Merge Patch)."""
         if not changes:
             raise AppError(ErrorCode.EMPTY_UPDATE)
-        unknown = changes.keys() - UPDATABLE_FIELDS
-        if unknown:
-            raise ValueError(f"Unsupported fields: {sorted(unknown)}")
 
         with _translate_name_conflict(), self._session.begin():
             model = self._get_active(requester, model_id, for_update=True)

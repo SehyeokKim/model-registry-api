@@ -184,8 +184,8 @@ class ModelVersionStatusUpdateRequest(BaseModel):
         default=None,
         description=(
             "학습 결과 아티팩트 위치. `READY`로 바꿀 때 필수이고 다른 상태에서는 보낼 수 없다. "
-            "스킴이 있는 절대 URI이며, 경로에 "
-            "`models/{model_id}/versions/{version_id}/`가 있어야 한다."
+            "스킴이 있는 절대 URI이며, 경로의 첫 `models` 세그먼트 바로 뒤가 "
+            "`{model_id}/versions/{version_id}/`여야 한다. `.`, `..` 세그먼트는 허용하지 않는다."
         ),
     )
 
