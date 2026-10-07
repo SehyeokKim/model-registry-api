@@ -3,7 +3,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.model_version import JSON_SCHEMA_MAX_BYTES, ModelVersionCreateRequest
+from app.schemas.model_version import (
+    JSON_SCHEMA_MAX_BYTES,
+    JSON_SCHEMA_MAX_DEPTH,
+    ModelVersionCreateRequest,
+)
 
 
 def _error_messages(error: ValidationError) -> list[str]:
@@ -95,3 +99,54 @@ def test_empty_body_creates_version_without_details() -> None:
 def test_undefined_field_is_rejected() -> None:
     with pytest.raises(ValidationError):
         ModelVersionCreateRequest(status="READY")  # type: ignore[call-arg]
+
+
+def _nested_list(depth: int) -> Any:
+    value: Any = 0
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+class TestJsonSchemaStructure:
+    def test_schema_at_max_depth_is_accepted(self) -> None:
+        # 객체(깊이 1) 안의 const 배열 31단계 = 깊이 32
+        schema = {"const": _nested_list(JSON_SCHEMA_MAX_DEPTH - 1)}
+
+        request = ModelVersionCreateRequest(input_schema=schema)
+
+        assert request.input_schema == schema
+
+    def test_deeply_nested_value_is_rejected(self) -> None:
+        """작은 문서라도 깊으면 응답 직렬화의 재귀 한도를 넘겨 저장 후 500이 된다."""
+        schema = {"const": _nested_list(120)}
+
+        with pytest.raises(ValidationError) as error:
+            ModelVersionCreateRequest(input_schema=schema)
+
+        assert "nested at most" in _error_messages(error.value)[0]
+
+    def test_deeply_nested_keywords_are_rejected_without_recursion_error(self) -> None:
+        schema: dict[str, Any] = {}
+        for _ in range(300):
+            schema = {"items": schema}
+
+        with pytest.raises(ValidationError):
+            ModelVersionCreateRequest(output_schema=schema)
+
+    @pytest.mark.parametrize(
+        "schema",
+        [
+            {"description": "a\x00"},
+            {"properties": {"a\x00": {"type": "string"}}},
+            {"enum": ["\ud800"]},
+        ],
+    )
+    def test_unstorable_text_in_schema_is_rejected(self, schema: dict[str, Any]) -> None:
+        with pytest.raises(ValidationError):
+            ModelVersionCreateRequest(input_schema=schema)
+
+
+def test_framework_with_nul_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ModelVersionCreateRequest(framework="xgb\x00")

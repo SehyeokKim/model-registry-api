@@ -70,3 +70,17 @@ class TestUpdateRequest:
     def test_unknown_field_is_rejected(self) -> None:
         with pytest.raises(ValidationError):
             ModelUpdateRequest.model_validate({"organization_id": "x"})
+
+
+class TestUnstorableText:
+    """PostgreSQL에 저장할 수 없는 문자는 저장 단계의 500이 아니라 입력 검증에서 거부한다."""
+
+    @pytest.mark.parametrize("text", ["a\x00b", "a\ud800"])
+    def test_name_with_unstorable_character_is_rejected(self, text: str) -> None:
+        with pytest.raises(ValidationError):
+            ModelCreateRequest(name=text, task_type=TaskType.CLASSIFICATION)
+
+    @pytest.mark.parametrize("text", ["a\x00b", "a\udfff"])
+    def test_description_with_unstorable_character_is_rejected(self, text: str) -> None:
+        with pytest.raises(ValidationError):
+            ModelUpdateRequest(description=text)

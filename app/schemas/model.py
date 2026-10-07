@@ -4,10 +4,10 @@ import unicodedata
 import uuid
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field
 
 from app.db.entities import ModelVersionStatus, TaskType
-from app.schemas.common import UtcDatetime
+from app.schemas.common import UtcDatetime, check_storable_text
 
 NAME_MAX_LENGTH = 100
 DESCRIPTION_MAX_LENGTH = 2000
@@ -34,10 +34,12 @@ ModelName = Annotated[
         ),
         examples=["churn-predictor"],
     ),
+    AfterValidator(check_storable_text),
 ]
 Description = Annotated[
     str | None,
     Field(max_length=DESCRIPTION_MAX_LENGTH, description="설명 (최대 2000자)"),
+    AfterValidator(check_storable_text),
 ]
 
 

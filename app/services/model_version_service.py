@@ -143,20 +143,25 @@ def _check_artifact_path(artifact_uri: str, model_id: uuid.UUID, version_id: uui
 
     경로에 models/{model_id}/versions/{version_id}/가 있어야 다른 버전의 아티팩트를 덮어쓰지 않고,
     영구 삭제 때 모델 ID로 아티팩트를 빠짐없이 찾아 파기할 수 있다 (ADR 0005).
-    버킷과 스킴은 제한하지 않는다.
+    버킷과 스킴, `models/` 앞의 접두 경로는 제한하지 않는다.
+    `..` 세그먼트나 앞에 다른 `models/` 경로를 넣어 규칙을 우회하지 못하게, 경로의 첫 `models`
+    세그먼트 바로 뒤가 이 모델과 버전이어야 한다.
     """
-    expected = f"/models/{model_id}/versions/{version_id}/"
-    if expected not in urlsplit(artifact_uri).path:
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR,
-            details=[
-                {
-                    "location": ["body", "artifact_uri"],
-                    "message": f"artifact_uri path must contain '{expected.lstrip('/')}'",
-                    "type": "value_error",
-                }
-            ],
-        )
+    expected = f"models/{model_id}/versions/{version_id}/"
+    segments = urlsplit(artifact_uri).path.split("/")
+    if any(segment in (".", "..") for segment in segments):
+        _raise_artifact_uri_error("artifact_uri path must not contain '.' or '..' segments")
+    start = segments.index("models") if "models" in segments else -1
+    owned = segments[start + 1 : start + 4] == [str(model_id), "versions", str(version_id)]
+    if start < 0 or not owned or len(segments) <= start + 4:
+        _raise_artifact_uri_error(f"artifact_uri path must contain '{expected}'")
+
+
+def _raise_artifact_uri_error(message: str) -> None:
+    raise AppError(
+        ErrorCode.VALIDATION_ERROR,
+        details=[{"location": ["body", "artifact_uri"], "message": message, "type": "value_error"}],
+    )
 
 
 @contextmanager

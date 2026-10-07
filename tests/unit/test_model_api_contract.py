@@ -46,10 +46,11 @@ class TestOpenApi:
         paths = client.get("/openapi.json").json()["paths"]
 
         expected = {
-            ("/api/v1/models", "post"): {"201", "401", "403", "409", "422", "503"},
+            ("/api/v1/models", "post"): {"201", "400", "401", "403", "409", "422", "503"},
             ("/api/v1/models/{model_id}", "get"): {"200", "401", "403", "404", "422", "503"},
             ("/api/v1/models/{model_id}", "patch"): {
                 "200",
+                "400",
                 "401",
                 "403",
                 "404",
@@ -81,6 +82,7 @@ class TestOpenApi:
             },
             ("/internal/v1/model-versions/{version_id}/status", "patch"): {
                 "200",
+                "400",
                 "401",
                 "403",
                 "404",
@@ -90,6 +92,7 @@ class TestOpenApi:
             },
             ("/api/v1/models/{model_id}/versions", "post"): {
                 "201",
+                "400",
                 "401",
                 "403",
                 "404",
@@ -132,6 +135,7 @@ class TestEtagDocumentation:
         ("/api/v1/models", "post", "201"),
         ("/api/v1/models/{model_id}", "get", "200"),
         ("/api/v1/models/{model_id}", "patch", "200"),
+        ("/api/v1/models/{model_id}", "delete", "200"),
         ("/api/v1/models/{model_id}/restore", "post", "200"),
     )
     CONDITIONAL_WRITES = (

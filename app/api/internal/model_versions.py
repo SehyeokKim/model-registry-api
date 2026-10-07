@@ -34,6 +34,7 @@ router = APIRouter(prefix="/model-versions", tags=["Internal"])
         "올린 아티팩트를 정리한다."
     ),
     responses=error_responses(
+        ErrorCode.BAD_REQUEST,
         ErrorCode.UNAUTHORIZED,
         ErrorCode.FORBIDDEN,
         ErrorCode.MODEL_VERSION_NOT_FOUND,

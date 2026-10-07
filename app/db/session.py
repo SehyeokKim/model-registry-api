@@ -16,6 +16,9 @@ def create_db_engine(settings: Settings) -> Engine:
         # 끊어진 연결(DB 재시작, 방화벽 유휴 종료)을 꺼내 쓰기 전에 걸러낸다.
         pool_pre_ping=True,
         connect_args={"connect_timeout": settings.db_connect_timeout},
+        # DB 오류 메시지에 SQL 파라미터(고객이 보낸 이름, 설명, 스키마)를 넣지 않는다.
+        # 예외가 로그로 남을 때 요청 본문이 함께 남는 것을 막는다.
+        hide_parameters=True,
     )
 
 

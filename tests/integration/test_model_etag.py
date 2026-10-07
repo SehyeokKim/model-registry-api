@@ -212,6 +212,19 @@ class TestIfMatch:
         assert response.headers["ETag"] == '"2"'
         assert _model_row(engine, model).deleted_at is None
 
+    def test_delete_response_etag_can_be_used_to_restore(
+        self, client: TestClient, model: dict[str, Any]
+    ) -> None:
+        """삭제된 모델은 조회할 수 없으므로, 복원의 If-Match는 삭제 응답의 ETag로 얻는다."""
+        deleted = client.delete(_path(model), headers=_headers())
+
+        restored = client.post(
+            f"{_path(model)}/restore", headers=_headers(if_match=deleted.headers["ETag"])
+        )
+
+        assert deleted.headers["ETag"] == '"2"'
+        assert restored.status_code == 200
+
     def test_stale_etag_rejects_restore(
         self, client: TestClient, engine: Engine, model: dict[str, Any]
     ) -> None:

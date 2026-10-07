@@ -17,17 +17,40 @@ from pydantic import (
 )
 
 from app.db.entities import ModelVersionStatus
-from app.schemas.common import UtcDatetime
+from app.schemas.common import UtcDatetime, check_storable_text
 
 FRAMEWORK_MAX_LENGTH = 50
 ARTIFACT_URI_MAX_LENGTH = 2048
 # 스키마 문서 하나의 최대 크기(JSON 직렬화 기준). 버전은 불변이라 저장된 문서가 끝까지 남고,
 # 추론 게이트웨이와 클라이언트도 이 문서를 읽으므로 비정상적으로 큰 문서를 막는다.
 JSON_SCHEMA_MAX_BYTES = 64 * 1024
+# 객체와 배열의 최대 중첩 깊이. 실제 입출력 스키마는 깊이 10을 넘는 일이 드물다.
+# 깊은 문서는 크기가 작아도 검증기와 응답 직렬화의 재귀 한도를 넘겨, 저장 후 500이 된다.
+JSON_SCHEMA_MAX_DEPTH = 32
 
+# format 검사의 `regex`는 Python `re`로 컴파일한다. 추론 게이트웨이도 Python으로 요청을 검증하므로,
+# 여기서 컴파일되지 않는 패턴(`\p{L}` 등)은 추론 시점에 실패한다. 저장 시점에 거부한다.
 _META_SCHEMA_VALIDATOR = Draft202012Validator(
     Draft202012Validator.META_SCHEMA, format_checker=Draft202012Validator.FORMAT_CHECKER
 )
+
+
+def _check_structure(value: dict[str, Any]) -> None:
+    """중첩 깊이와 저장할 수 없는 문자를 재귀 없이 확인한다."""
+    stack: list[tuple[Any, int]] = [(value, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if isinstance(node, dict | list):
+            if depth > JSON_SCHEMA_MAX_DEPTH:
+                raise ValueError(
+                    f"JSON Schema must be nested at most {JSON_SCHEMA_MAX_DEPTH} levels"
+                )
+            children = node.items() if isinstance(node, dict) else enumerate(node)
+            for key, child in children:
+                check_storable_text(key)
+                stack.append((child, depth + 1))
+        else:
+            check_storable_text(node)
 
 
 def _check_json_schema(value: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -37,6 +60,7 @@ def _check_json_schema(value: dict[str, Any] | None) -> dict[str, Any] | None:
     """
     if value is None:
         return None
+    _check_structure(value)
     size = len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode())
     if size > JSON_SCHEMA_MAX_BYTES:
         raise ValueError(f"JSON Schema must be at most {JSON_SCHEMA_MAX_BYTES} bytes")
@@ -97,14 +121,21 @@ class ModelVersionCreateRequest(BaseModel):
         str | None,
         BeforeValidator(_strip),
         Field(min_length=1, max_length=FRAMEWORK_MAX_LENGTH),
+        AfterValidator(check_storable_text),
     ] = Field(default=None, description="학습 프레임워크 (예: xgboost, lightgbm). 1–50자")
     input_schema: JsonSchemaDocument = Field(
         default=None,
-        description="추론 입력 형식. JSON Schema Draft 2020-12 문서, 직렬화 기준 64 KiB 이하",
+        description=(
+            "추론 입력 형식. JSON Schema Draft 2020-12 문서, 직렬화 기준 64 KiB 이하, "
+            "중첩 깊이 32 이하. `pattern`은 Python 정규식으로 컴파일할 수 있어야 한다"
+        ),
     )
     output_schema: JsonSchemaDocument = Field(
         default=None,
-        description="추론 출력 형식. JSON Schema Draft 2020-12 문서, 직렬화 기준 64 KiB 이하",
+        description=(
+            "추론 출력 형식. JSON Schema Draft 2020-12 문서, 직렬화 기준 64 KiB 이하, "
+            "중첩 깊이 32 이하. `pattern`은 Python 정규식으로 컴파일할 수 있어야 한다"
+        ),
     )
 
 
@@ -147,6 +178,7 @@ class ModelVersionStatusUpdateRequest(BaseModel):
         str | None,
         BeforeValidator(_strip),
         Field(min_length=1, max_length=ARTIFACT_URI_MAX_LENGTH),
+        AfterValidator(check_storable_text),
         AfterValidator(_check_absolute_uri),
     ] = Field(
         default=None,

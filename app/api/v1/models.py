@@ -31,6 +31,9 @@ _COMMON_ERRORS = (
     ErrorCode.SERVICE_UNAVAILABLE,
 )
 
+# 요청 본문을 받는 API만 낼 수 있는 에러 (UTF-8이 아닌 본문)
+_BODY_ERRORS = (ErrorCode.BAD_REQUEST,)
+
 # 모델 단건 응답의 ETag (ADR 0007)
 _ETAG_HEADER = {
     "ETag": {
@@ -74,7 +77,7 @@ def _if_match(value: str | None) -> IfMatch | None:
     ),
     responses={
         201: {"headers": _ETAG_HEADER},
-        **error_responses(*_COMMON_ERRORS, ErrorCode.MODEL_NAME_CONFLICT),
+        **error_responses(*_BODY_ERRORS, *_COMMON_ERRORS, ErrorCode.MODEL_NAME_CONFLICT),
     },
 )
 def create_model(
@@ -175,6 +178,7 @@ def get_model(
     responses={
         200: {"headers": _ETAG_HEADER},
         **error_responses(
+            *_BODY_ERRORS,
             *_COMMON_ERRORS,
             ErrorCode.MODEL_NOT_FOUND,
             ErrorCode.MODEL_NAME_CONFLICT,
@@ -206,19 +210,25 @@ def update_model(
         "모델을 삭제 상태로 바꾼다. 응답의 `purge_at`까지 복원할 수 있고, 이후 영구 삭제된다.\n\n"
         "삭제된 모델은 조회, 수정, 삭제 대상에서 제외된다(404). "
         "같은 이름으로 새 모델을 만들 수 있다. "
-        "`If-Match`를 보내면 다른 사람이 먼저 수정했을 때 `PRECONDITION_FAILED`로 거부한다."
+        "`If-Match`를 보내면 다른 사람이 먼저 수정했을 때 `PRECONDITION_FAILED`로 거부한다.\n\n"
+        "삭제된 모델은 조회할 수 없으므로, 응답의 `ETag`를 복원 요청의 `If-Match`에 쓴다."
     ),
-    responses=error_responses(
-        *_COMMON_ERRORS, ErrorCode.MODEL_NOT_FOUND, ErrorCode.PRECONDITION_FAILED
-    ),
+    responses={
+        200: {"headers": _ETAG_HEADER},
+        **error_responses(
+            *_COMMON_ERRORS, ErrorCode.MODEL_NOT_FOUND, ErrorCode.PRECONDITION_FAILED
+        ),
+    },
 )
 def delete_model(
     model_id: uuid.UUID,
     requester: CustomerDep,
     service: ModelServiceDep,
+    response: Response,
     if_match: IfMatchHeader = None,
 ) -> ModelDeletedResponse:
     model = service.delete(requester, model_id, if_match=_if_match(if_match))
+    response.headers["ETag"] = format_etag(model.row_version)
     return ModelDeletedResponse.model_validate(model)
 
 

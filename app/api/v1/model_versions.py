@@ -28,6 +28,7 @@ router = APIRouter(prefix="/models/{model_id}/versions", tags=["Model Versions"]
         "- 같은 모델의 다른 쓰기와 충돌해 `MODEL_VERSION_CONFLICT`가 나면 다시 요청한다."
     ),
     responses=error_responses(
+        ErrorCode.BAD_REQUEST,
         ErrorCode.UNAUTHORIZED,
         ErrorCode.FORBIDDEN,
         ErrorCode.MODEL_NOT_FOUND,

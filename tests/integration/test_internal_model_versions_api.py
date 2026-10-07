@@ -185,6 +185,41 @@ class TestArtifactUri:
         assert response.json()["error"]["details"][0]["location"] == ["body", "artifact_uri"]
         assert _row_version(engine, model["id"]) == 1
 
+    @pytest.mark.parametrize(
+        "path_template",
+        [
+            # 상위 경로로 빠져나가 다른 모델의 경로에 쓰는 경우
+            "models/{m}/versions/{v}/../../{other}/model.tar.gz",
+            # 앞에 다른 모델의 경로를 두고 뒤에 이 버전의 경로를 붙인 경우
+            "models/{other}/versions/{other}/models/{m}/versions/{v}/model.tar.gz",
+            # 버전 디렉터리 아래가 아니라 버전 ID로 끝나는 경우
+            "models/{m}/versions/{v}",
+        ],
+    )
+    def test_artifact_path_that_escapes_version_directory_is_rejected(
+        self, client: TestClient, engine: Engine, model: dict[str, Any], path_template: str
+    ) -> None:
+        version_id = insert_version(engine, model["id"], status=ModelVersionStatus.TRAINING)
+        path = path_template.format(m=model["id"], v=version_id, other=uuid.uuid4())
+
+        response = _change(
+            client, version_id, status="READY", artifact_uri=f"s3://model-artifacts/{path}"
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error"]["details"][0]["location"] == ["body", "artifact_uri"]
+
+    def test_artifact_path_may_have_prefix_before_models(
+        self, client: TestClient, engine: Engine, model: dict[str, Any]
+    ) -> None:
+        version_id = insert_version(engine, model["id"], status=ModelVersionStatus.TRAINING)
+        uri = f"s3://model-artifacts/prod/models/{model['id']}/versions/{version_id}/model.tar.gz"
+
+        response = _change(client, version_id, status="READY", artifact_uri=uri)
+
+        assert response.status_code == 200
+        assert response.json()["artifact_uri"] == uri
+
 
 class TestAccess:
     def test_customer_cannot_call_internal_api(
