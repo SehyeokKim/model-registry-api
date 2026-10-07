@@ -6,7 +6,7 @@ AutoML 플랫폼 전체 데이터 모델. 이 저장소는 이 중 `organization
 - 고객 데이터(데이터셋, 모델)는 사용자 개인이 아니라 고객 조직(`organizations`)이 소유한다. 같은 조직의 사용자는 데이터를 공유하고, 다른 조직의 데이터는 볼 수 없다 (ADR 0006)
 - 파일(데이터 원본, 모델 아티팩트)은 오브젝트 스토리지에 저장하고 DB에는 메타데이터와 URI만 저장
 - 데이터와 모델은 "이름표(datasets/models) + 불변 버전(*_versions)" 구조. 수정/추가 시 덮어쓰지 않고 새 버전 생성 → 재현성 확보
-- 모델 삭제는 소프트 삭제(`deleted_at`) + 복원 기한(`purge_at`)
+- 모델과 데이터셋 삭제는 소프트 삭제(`deleted_at`) + 복원 기한(`purge_at`). 기한이 지나면 즉시 영구 삭제된 것으로 본다
 - 모델별로 다른 입출력은 `model_versions.input_schema / output_schema` (JSONB, JSON Schema 형식)으로 관리
 - 학습 상태는 `training_jobs.status` + 이력 테이블 `training_job_events`로 추적, 장시간 학습 대비 체크포인트/재시도 컬럼 보유
 - 추론 요청/응답 로그는 양이 많아 RDB에 두지 않고 데이터 레이크(Parquet)로 적재 → 서비스 DB와 분석 부하 분리
@@ -14,18 +14,18 @@ AutoML 플랫폼 전체 데이터 모델. 이 저장소는 이 중 `organization
 ## 테이블 요약
 | 영역 | 테이블 | 역할 |
 |---|---|---|
-| 조직 | organizations | 고객사(테넌트). 데이터셋과 모델의 소유 단위 |
+| 조직 | organizations | 고객사(테넌트). 데이터셋과 모델의 소유 단위, 내부 분석 동의 여부 |
 | 사용자 | users | 고객/내부 사용자, role로 구분. 고객은 조직 하나에 속함 |
-| 데이터 | datasets | 데이터셋 이름표, 소프트 삭제 |
-| 데이터 | dataset_versions | 업로드 파일 1건, 원본/Parquet URI, 크기, 체크섬, 업로드 상태 |
+| 데이터 | datasets | 데이터셋 이름표, 소프트 삭제 + 복원 기한 |
+| 데이터 | dataset_versions | 업로드 파일 1건, 원본 URI, Parquet 매니페스트 URI, 크기, 체크섬, 업로드 상태 |
 | 데이터 | dataset_columns | 버전별 컬럼명, 타입 |
 | 모델 | models | 모델 이름표, 소프트 삭제 + 복원 기한 |
 | 모델 | model_versions | 학습 결과물 v1, v2…, 부모 버전, 입출력 스키마, 아티팩트 URI |
 | 모델 | model_version_datasets | 버전 ↔ 데이터 버전 N:M (학습 데이터 계보) |
 | 모델 | model_metrics | 성능 지표 (행 단위, 버전 간 비교 용이) |
-| 학습 | training_jobs | 학습 작업 (버전과 1:1), 상태, GPU, K8s Job, 체크포인트, 재시도 |
+| 학습 | training_jobs | 학습 작업 (버전과 1:1), 상태, 학습 이미지 digest, GPU, K8s Job, 체크포인트, 재시도 |
 | 학습 | training_job_events | 학습 상태 변경 이력 |
-| 서빙 | deployments | 모델별 엔드포인트, active_version_id 교체로 배포/롤백 |
+| 서빙 | deployments | 모델별 엔드포인트, active_version_id 교체로 배포/롤백, 공유 서버 풀/전용 서버 구분 |
 
 ## 다이어그램
 
@@ -52,6 +52,7 @@ erDiagram
     organizations {
         uuid id PK
         string name
+        boolean analytics_consent "분석 동의 (기본 false)"
         timestamptz created_at
     }
     users {
@@ -71,6 +72,7 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
         timestamptz deleted_at
+        timestamptz purge_at
     }
     dataset_versions {
         uuid id PK
@@ -79,8 +81,8 @@ erDiagram
         uuid base_version_id FK "nullable"
         string source_type "UPLOAD|APPEND|EDIT"
         string file_format "CSV|XLSX"
-        string original_uri
-        string parquet_uri
+        string original_uri "원본은 READY 7일 후 삭제"
+        string parquet_uri "Parquet 매니페스트"
         bigint size_bytes
         string checksum_sha256
         bigint row_count
@@ -134,6 +136,7 @@ erDiagram
         string target_column
         jsonb feature_columns
         jsonb hyperparameters
+        string image_digest "학습 이미지"
         string gpu_type
         int gpu_count
         string k8s_job_name
@@ -167,7 +170,8 @@ erDiagram
         uuid active_version_id FK
         string endpoint_path
         string status "ACTIVE|INACTIVE"
-        int replicas
+        string serving_mode "SHARED|DEDICATED"
+        int replicas "DEDICATED일 때만"
         timestamptz updated_at
     }
 ```
