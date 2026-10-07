@@ -5,7 +5,7 @@
 
 | 파일 | 리소스 | 근거 |
 |---|---|---|
-| `configmap.yaml` | 비밀이 아닌 설정 (`.env.example`과 같은 변수) | |
+| `configmap.yaml` | 비밀이 아닌 앱 설정 (`.env.example`의 앱 변수 중 DB 접속 정보를 뺀 것. DB 접속 정보는 Secret) | |
 | `migrate-job.yaml` | 배포 전 마이그레이션 Job (Argo CD `PreSync` hook) | ADR 0001 |
 | `deployment.yaml` | API Deployment (Pod당 워커 1개, liveness, readiness, startup probe) | ADR 0002 |
 | `service.yaml` | 클러스터 내부 Service (ClusterIP) | |

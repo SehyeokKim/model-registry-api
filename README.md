@@ -121,7 +121,7 @@ curl -X POST $API/api/v1/models/$MODEL_ID/restore -H "X-User-Id: $A1"
 | `GET` | `/api/v1/models` | 목록. 커서 페이지네이션, `status=active\|deleted\|all`, `limit` 1–100 |
 | `GET` | `/api/v1/models/{model_id}` | 단건 조회 (버전 목록 포함). `ETag` |
 | `PATCH` | `/api/v1/models/{model_id}` | 수정 (JSON Merge Patch). `If-Match` 선택 |
-| `DELETE` | `/api/v1/models/{model_id}` | 소프트 삭제. 응답에 복원 기한 `purge_at`. `If-Match` 선택 |
+| `DELETE` | `/api/v1/models/{model_id}` | 소프트 삭제. 응답에 복원 기한 `purge_at`과 복원에 쓸 `ETag`. `If-Match` 선택 |
 | `POST` | `/api/v1/models/{model_id}/restore` | 복원 기한 전의 삭제된 모델 복원. `If-Match` 선택 |
 | `POST` | `/api/v1/models/{model_id}/versions` | 버전 생성 (`PENDING`, 번호 자동 증가) |
 
@@ -151,7 +151,7 @@ PENDING ──► TRAINING ──► READY ──► ARCHIVED
 - **에러 형식**: 항상 `{"error": {"code", "message", "details"}}`입니다. 클라이언트는 `code`로 분기하고 화면 문구는 직접 현지화합니다. `message`는 개발자용 영어 문장입니다.
 - **시각**: 모두 UTC ISO 8601(`2026-10-06T03:00:00Z`)입니다.
 - **요청 ID**: 모든 응답에 `X-Request-ID` 헤더가 붙습니다. 요청에 올바른 형식의 값이 있으면 그대로 쓰고, 이 값으로 해당 요청의 로그를 찾을 수 있습니다.
-- **동시 수정 방지**: 모델 단건 응답의 `ETag`를 수정, 삭제, 복원 요청의 `If-Match`에 넣으면, 그사이 다른 사람이 바꿨을 때 412로 거부됩니다. `If-Match`를 생략하면 비교 없이 처리합니다.
+- **동시 수정 방지**: 모델 단건 응답과 삭제 응답의 `ETag`를 수정, 삭제, 복원 요청의 `If-Match`에 넣으면, 그사이 다른 사람이 바꿨을 때 412로 거부됩니다. `If-Match`를 생략하면 비교 없이 처리합니다.
 - **모델 이름**: NFC 정규화와 앞뒤 공백 제거 후 1–100자이며, 같은 조직의 활성 모델과 겹칠 수 없습니다.
 
 ## 에러 코드
@@ -210,7 +210,7 @@ docker compose exec api python -m scripts.purge_expired_models
 
 ### 로그
 
-로그는 한 줄에 JSON 객체 하나로 표준 출력에 남깁니다. 공통 필드는 `timestamp`, `level`, `logger`, `message`, `request_id`, `organization_id`, `user_id`이고, 요청마다 접근 로그 한 줄(`method`, `path`, `status`, `latency_ms`)을 남깁니다. 요청과 응답 본문은 고객 데이터가 섞일 수 있어 남기지 않습니다.
+로그는 한 줄에 JSON 객체 하나로 표준 출력에 남깁니다. 공통 필드는 `timestamp`, `level`, `logger`, `message`, `request_id`, `organization_id`, `user_id`이고, 요청마다 접근 로그 한 줄(`method`, `path`, `status`, `latency_ms`)을 남깁니다. 헬스 체크(`/health/*`)의 접근 로그는 DEBUG로 남깁니다. 요청과 응답 본문은 고객 데이터가 섞일 수 있어 남기지 않고, DB 오류 메시지에도 SQL 파라미터를 넣지 않습니다.
 
 ```bash
 docker compose logs -f api
@@ -234,7 +234,7 @@ docker compose logs -f api
 | `migrate` 서비스 | Argo CD `PreSync` hook Job (성공해야 롤아웃 진행) | ADR 0001 |
 | `api` 서비스, healthcheck | Deployment (liveness, readiness, startup probe), Service | ADR 0002 |
 | 수동 `purge_expired_models` 실행 | CronJob (매일 03:00 KST, `concurrencyPolicy: Forbid`) | ADR 0005 |
-| `API_PORT` 등 환경 변수 | ConfigMap, Secret (마이그레이션 계정과 API 계정 분리) | ADR 0001 |
+| 앱 환경 변수(`DATABASE_URL`, `LOG_*`, `DB_POOL_*` 등) | ConfigMap, Secret (마이그레이션 계정과 API 계정 분리). `API_PORT`는 compose 전용이며 Kubernetes에서는 Service가 포트를 맡음 | ADR 0001 |
 | | HPA 2–8개 (DB 연결 예산 `8 × 10 + 15 ≤ 100`) | ADR 0002 |
 
 - 모든 워크로드가 non-root, 읽기 전용 루트 파일 시스템, 권한 제거(`capabilities: drop ALL`)로 실행됩니다.
@@ -308,12 +308,12 @@ docs/                  ERD, ADR
 - **유스케이스 하나가 트랜잭션 하나**입니다. 서비스 계층이 트랜잭션 경계를 명시하고(`autobegin=False`), 실패하면 전체를 롤백합니다. 예를 들어 이름 충돌로 실패한 수정은 함께 보낸 다른 필드도 바꾸지 않습니다.
 - **모델 행 잠금 (ADR 0003)**: 수정, 삭제, 복원, 버전 생성, 버전 상태 변경은 모델 행을 `FOR NO KEY UPDATE`로 잠가 직렬화합니다. 격리 수준은 READ COMMITTED를 유지하면서 버전 번호가 빈틈과 중복 없이 증가하고(동시 10건 → 1–10), 동시에 들어온 상태 전이 중 하나만 반영됩니다. FK 참조용 `KEY SHARE` 잠금과 충돌하지 않는 모드를 골랐습니다.
 - **중복은 미리 조회하지 않고 제약으로 판단**: 같은 이름 동시 생성이나 동시 복원은 unique index 위반을 도메인 에러로 바꿔 정확히 하나만 성공합니다.
-- **낙관적 동시성 (ADR 0007)**: 행 잠금은 "낡은 화면을 보고 저장하는" 문제를 막지 못하므로, `row_version` 기반 strong ETag와 `If-Match`로 lost update를 막습니다. 판단 순서는 RFC 9110을 따릅니다.
+- **낙관적 동시성 (ADR 0007)**: 행 잠금은 "낡은 화면을 보고 저장하는" 문제를 막지 못하므로, `row_version` 기반 strong ETag와 `If-Match`로 lost update를 막습니다. 모델 없음(404), 복원 대상 아님(409, 410)은 `If-Match`보다 먼저 판단하고, 유형 잠금과 이름 충돌은 `If-Match` 비교 뒤에 판단해 그사이 바뀐 사실을 412로 먼저 알립니다.
 
 ### 성능과 확장
 - **keyset 페이지네이션**: 목록은 `(created_at, id)` 커서로 넘기고 `(organization_id, created_at, id)` 인덱스를 역방향으로 읽어, 페이지 위치와 관계없이 필요한 행만 읽습니다.
 - **N+1 방지**: 목록의 버전 수와 최신 버전 번호는 `LATERAL` 집계로 페이지에 들어간 모델만 계산합니다. 모델 2만 건, 버전 6만 건에서 `EXPLAIN ANALYZE`로 21행만 읽는 것을 확인했고(0.5ms), 쿼리 수가 모델 수와 무관한지 테스트로 고정했습니다. ORM 관계는 지연 로딩을 금지(`lazy="raise"`)해 실수로 생긴 N+1이 바로 드러나게 했습니다.
-- **큰 컬럼 지연 로딩**: 버전 스키마(JSONB)는 모델 조회 응답에 쓰지 않으므로 기본으로 읽지 않습니다.
+- **큰 컬럼 지연 로딩**: 버전 스키마(JSONB)는 모델 조회 응답에 쓰지 않으므로 기본으로 읽지 않습니다. 스키마 문서는 64 KiB, 중첩 깊이 32로 제한합니다.
 - **DB 연결 예산 (ADR 0002)**: 컨테이너당 워커 1개와 커넥션 최대 10개로 고정하고, 확장은 Pod 수로 합니다. 풀 대기가 5초를 넘으면 503과 `Retry-After`로 빠르게 실패합니다. `HPA 최대 Pod 수 × Pod당 연결 수 + 여유 ≤ max_connections` 공식으로 PgBouncer 도입 시점을 정해 두었습니다.
 
 ### 데이터 수명주기 (ADR 0005, 0009)
@@ -324,7 +324,7 @@ docs/                  ERD, ADR
 ### 컨테이너와 실행 환경 (ADR 0001)
 - 마이그레이션은 API와 분리된 일회성 `migrate` 서비스가 실행하고, API는 그 서비스가 성공한 뒤에만 시작합니다(`service_completed_successfully`). API 레플리카가 여러 개일 때 각자 마이그레이션을 돌리는 경쟁을 없애는 구조로, Kubernetes의 배포 전 마이그레이션 Job과 같습니다.
 - 데모 데이터는 스키마 마이그레이션과 분리된 멱등 시드 스크립트로 넣고, 운영에서는 끕니다.
-- compose의 healthcheck는 liveness(`/health/live`)와 readiness(`/health/ready`)를 나눠, Kubernetes probe와 같은 기준으로 동작합니다.
+- 생존 확인(`/health/live`)과 준비 확인(`/health/ready`, DB 연결 포함)을 나눴습니다. compose의 api healthcheck는 준비 확인을 쓰고, Kubernetes에서는 각각 liveness probe와 readiness probe가 씁니다. DB healthcheck는 첫 초기화 중의 임시 서버를 준비됨으로 오판하지 않도록 TCP로 확인합니다.
 - 같은 구조를 Kubernetes 참조 매니페스트로 옮겨, ADR의 "운영에서는 이렇게 한다"를 실행 가능한 형태로 남겼습니다([운영 작업과 설정](#kubernetes-참조-매니페스트)).
 
 ### API 문서화와 에러 처리 (ADR 0008)

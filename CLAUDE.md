@@ -40,7 +40,7 @@
 - SQLAlchemy 2.1 (2.0 스타일 API), Alembic, psycopg 3
 - jsonschema (버전 입출력 스키마의 메타스키마 검증)
 - PostgreSQL 16
-- pytest, httpx
+- pytest, httpx2 (테스트 클라이언트)
 - Ruff (lint, format)
 - Docker 멀티스테이지 빌드, non-root 실행, healthcheck, `depends_on: condition: service_healthy`
 - 베이스 이미지는 `latest` 대신 구체적인 태그로 고정한다 (예: `python:3.12-slim`, `postgres:16-alpine`).
@@ -48,7 +48,7 @@
 
 ## 주요 명령어
 ```bash
-# 실행 (평가 및 배포와 동일한 경로)
+# 실행 (배포와 동일한 경로)
 docker compose up -d --build
 docker compose logs -f api
 docker compose down -v                    # 종료 및 볼륨 삭제
@@ -66,9 +66,9 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 ```
 
 ## API
-### 운영 엔드포인트 (필수, compose healthcheck가 사용)
-- `GET /health/live`: 프로세스 생존 확인 (DB 확인 없음)
-- `GET /health/ready`: DB 연결까지 확인
+### 운영 엔드포인트 (필수, compose와 Kubernetes probe가 사용)
+- `GET /health/live`: 프로세스 생존 확인 (DB 확인 없음). 이미지 HEALTHCHECK와 Kubernetes liveness probe가 사용
+- `GET /health/ready`: DB 연결까지 확인. compose api healthcheck와 Kubernetes readiness probe가 사용
 
 ### Core
 | 작업 | 메서드 | 경로 | 설명 |
@@ -101,7 +101,7 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 - 성공 응답은 래핑하지 않고 리소스를 그대로 반환한다. 목록만 `{"items": [...], "next_cursor": "..." | null}` 형식이다.
 - 에러 응답은 항상 `{"error": {"code": "MODEL_NOT_FOUND", "message": "...", "details": null}}` 형식이다. `details`에는 필드별 검증 오류 등 추가 정보를 담는다.
 - 시각은 UTC ISO 8601(`2026-10-06T03:00:00Z`)로 반환한다.
-- 모델 단건 응답(생성, 조회, 수정, 복원)에는 `ETag` 헤더를 붙인다 (아래 "동시 수정 방지", ADR 0007).
+- 모델 단건 응답(생성, 조회, 수정, 복원)과 삭제 응답에는 `ETag` 헤더를 붙인다 (아래 "동시 수정 방지", ADR 0007).
 
 ### 언어와 현지화
 - OpenAPI의 summary, description은 한국어로 쓴다.
@@ -115,28 +115,29 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 |---|---|---|
 | `BAD_REQUEST` | 400 | 요청 본문을 해석할 수 없음 (UTF-8이 아닌 인코딩 등) |
 | `UNAUTHORIZED` | 401 | `X-User-Id`가 없거나, UUID 형식이 아니거나, 존재하지 않는 사용자 |
-| `FORBIDDEN` | 403 | 내부 사용자가 고객 API를 호출하거나, 고객이 내부 API를 호출 |
+| `FORBIDDEN` | 403 | 조직에 속하지 않은 내부 사용자가 고객 API를 호출하거나, 고객이 내부 API를 호출 |
 | `NOT_FOUND` | 404 | 정의되지 않은 경로 |
-| `METHOD_NOT_ALLOWED` | 405 | 경로가 지원하지 않는 HTTP 메서드 (`Allow` 헤더 포함) |
-| `MODEL_NOT_FOUND` | 404 | 모델이 없음, 삭제됨(조회/수정/삭제/버전 생성), 다른 조직 소유, 영구 삭제됨 |
-| `MODEL_VERSION_NOT_FOUND` | 404 | 내부 API에서 버전이 없거나, 모델이 영구 삭제됨 (복원 기한 경과 포함) |
-| `INVALID_STATUS_TRANSITION` | 409 | 허용되지 않은 버전 상태 전이 (같은 상태로의 전이 포함) |
-| `PRECONDITION_FAILED` | 412 | `If-Match`의 ETag가 현재 모델 상태와 다름. 응답에 현재 `ETag` 헤더 포함 |
-| `MODEL_NAME_CONFLICT` | 409 | 생성, 이름 수정, 복원 시 같은 조직의 활성 모델 이름과 중복 |
-| `MODEL_VERSION_CONFLICT` | 409 | 버전 번호 unique 제약 위반 (재시도 가능) |
+| `MODEL_NOT_FOUND` | 404 | 모델이 없거나, 삭제되었거나(복원 제외), 다른 조직 소유이거나, 영구 삭제됨 (존재 여부를 드러내지 않음) |
+| `MODEL_VERSION_NOT_FOUND` | 404 | 내부 API에서 버전이 없거나, 소속 모델이 영구 삭제됨 (복원 기한 경과 포함) |
+| `METHOD_NOT_ALLOWED` | 405 | 경로가 지원하지 않는 HTTP 메서드 |
+| `MODEL_NAME_CONFLICT` | 409 | 같은 조직에 같은 이름의 활성 모델이 있음 |
 | `TASK_TYPE_LOCKED` | 409 | 버전이 있는 모델의 `task_type` 변경 시도 |
-| `MODEL_NOT_DELETED` | 409 | 삭제되지 않은 모델 복원 시도 |
+| `MODEL_NOT_DELETED` | 409 | 삭제되지 않은 모델의 복원 시도 |
+| `MODEL_VERSION_CONFLICT` | 409 | 버전 번호가 동시에 생성된 다른 버전과 겹침 (다시 시도하면 된다) |
+| `INVALID_STATUS_TRANSITION` | 409 | 허용되지 않은 버전 상태 전이 (같은 상태로의 전이 포함) |
 | `MODEL_PURGED` | 410 | 복원 기한(`purge_at`)이 지나 영구 삭제된 것으로 보는 모델의 복원 시도 |
-| `EMPTY_UPDATE` | 422 | 변경할 필드가 없는 PATCH 요청(`{}`) |
-| `INVALID_PARENT_VERSION` | 422 | 부모 버전이 없거나, 다른 모델의 버전이거나, `READY`가 아님 |
-| `VALIDATION_ERROR` | 422 | 요청 형식이나 값 검증 실패 (정의되지 않은 필드, 잘못된 커서, 잘못된 JSON Schema 포함) |
-| `SERVICE_UNAVAILABLE` | 503 | DB 커넥션 풀 대기 시간 초과 또는 DB 연결 불가. `Retry-After` 헤더 포함 |
-| `INTERNAL_ERROR` | 500 | 처리되지 않은 예외. 내부 정보는 응답에 넣지 않고 로그로만 남김 |
+| `PRECONDITION_FAILED` | 412 | `If-Match`의 ETag가 현재 모델과 다름 (응답에 현재 `ETag` 헤더 포함) |
+| `INVALID_PARENT_VERSION` | 422 | 부모 버전이 없거나, 다른 모델의 버전이거나, `READY` 상태가 아님 |
+| `EMPTY_UPDATE` | 422 | 변경할 필드가 없는 수정 요청(`{}`) |
+| `VALIDATION_ERROR` | 422 | 요청 형식이나 값 검증 실패 (`details`에 필드별 오류) |
+| `INTERNAL_ERROR` | 500 | 처리되지 않은 서버 오류 |
+| `SERVICE_UNAVAILABLE` | 503 | DB 커넥션 풀 대기 시간 초과 또는 DB 접속 실패 (`Retry-After` 헤더 포함) |
 
 ## 도메인 규칙
 - 모델은 고객 조직이 소유한다 (ADR 0006). 같은 조직의 사용자는 조직의 모든 모델을 다룰 수 있고, 다른 조직의 모델은 404다.
   - 조직 소유 테이블을 다루는 repository 함수는 `organization_id`를 필수 인자로 받는다. 조직 조건 없는 조회 함수를 만들지 않는다.
   - 예외: 조직을 가로지르는 시스템 배치(복원 기한이 지난 모델 영구 삭제)는 전용 repository(`model_purge_repository.py`)에만 두고, API 경로에서 쓰지 않으며 고객에게 데이터를 돌려주지 않는다.
+  - 예외: 내부 API는 버전의 소속 조직만 먼저 찾는다(`ModelVersionRepository.get_owner`). 모델 자체는 찾은 조직으로 다시 조직 범위 함수를 써서 잠근다.
   - `models.created_by`는 만든 사용자 기록용이며 권한 판단에 쓰지 않는다.
 - 같은 조직 내 활성 모델 이름은 중복될 수 없다 (partial unique index `(organization_id, name) WHERE deleted_at IS NULL`).
 
@@ -149,6 +150,7 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
   - 전각/반각까지 통일하는 NFKC는 쓰지 않는다. 사용자가 입력한 모양(`Ａ`, `ｶ` 등)을 바꾸기 때문이다.
 - 이름은 한국어, 일본어 등 모든 언어를 허용하고, 대소문자를 구분한다.
 - 설명(`description`)은 선택 항목이며 최대 2000자다.
+- 모든 텍스트 입력(이름, 설명, framework, artifact_uri, 스키마 문서 안의 문자열)은 NUL(U+0000)과 짝 없는 서로게이트(U+D800–U+DFFF)를 422로 거부한다. PostgreSQL에 저장할 수 없어 저장 단계에서 500이 되기 때문이다.
 - 삭제는 소프트 삭제: `deleted_at = now()`, `purge_at = deleted_at + MODEL_RESTORE_WINDOW_DAYS` (기본 30일).
   - 삭제 응답은 200과 `{"id", "deleted_at", "purge_at"}`이다. 클라이언트가 복원 기한을 사용자에게 알려줄 수 있게 하기 위해서다.
 - 삭제된 모델은 조회, 수정 대상에서 제외된다 (404). 복원만 가능하다.
@@ -176,6 +178,8 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 - `input_schema`, `output_schema`는 저장 전에 JSON Schema Draft 2020-12 메타스키마로 검증한다. 스키마 문서 자체가 올바른지 확인하는 것이며, 실패하면 422 `VALIDATION_ERROR`이고 `details`에 오류 위치를 담는다.
   - 이유: 이 스키마는 추론 게이트웨이의 요청 검증, 클라이언트 입력 화면 생성, 버전 간 비교에 쓰이는 계약이다. 버전은 불변이라 잘못 저장되면 고칠 수 없고, 오류는 추론 시점에야 드러난다. 그래서 저장 시점에 바로 실패시킨다.
   - 스키마가 실제 데이터셋 컬럼과 맞는지는 이 서비스에서 확인하지 않는다 (학습 파이프라인의 책임).
+  - 문서 크기는 직렬화 기준 64 KiB, 객체와 배열의 중첩 깊이는 32 이하다. 깊은 문서는 크기가 작아도 응답 직렬화의 재귀 한도를 넘겨, 저장된 뒤 500이 된다.
+  - `pattern`은 Python 정규식으로 컴파일할 수 있어야 한다. 추론 게이트웨이도 Python으로 검증하므로 여기서 컴파일되지 않으면 추론 시점에 실패한다.
 - 모델 아티팩트와 체크포인트 저장 경로는 `version_no`가 아니라 UUID로만 만든다. `version_no` 기반 경로는 덮어쓰기 위험이 있다.
   - 예: `models/{model_id}/versions/{version_id}/`, `checkpoints/{training_job_id}/`
 
@@ -194,17 +198,19 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 - `artifact_uri`는 `READY`로 전이할 때만 받는다. 다른 전이에서 보내면 422.
 - 모델 행을 `FOR NO KEY UPDATE`로 잠근 뒤 버전 상태를 바꾼다 (ADR 0003). 버전 상태도 모델 단건 응답에 포함되므로 모델의 `row_version`도 올린다 (ADR 0007).
 - 소프트 삭제된 모델의 버전도 상태를 바꿀 수 있다. 삭제 전에 시작한 학습이 끝나면 결과를 기록해야 복원 후 상태가 정확하다. 영구 삭제된 뒤(복원 기한 경과 포함)에는 404 `MODEL_VERSION_NOT_FOUND`.
-- `artifact_uri`는 스킴이 있는 절대 URI(최대 2048자)이고, 경로에 `models/{model_id}/versions/{version_id}/`가 있어야 한다. 아니면 422 `VALIDATION_ERROR`.
-  - 이유: 아티팩트 경로를 UUID로만 만드는 규칙(덮어쓰기 방지)을 API에서 보장하고, 영구 삭제 시 모델 ID로 아티팩트를 빠짐없이 찾아 파기할 수 있게 한다 (ADR 0005). 버킷과 스킴은 제한하지 않는다.
+- `artifact_uri`는 스킴이 있는 절대 URI(최대 2048자)이고, 경로의 첫 `models` 세그먼트 바로 뒤가 `{model_id}/versions/{version_id}/`여야 한다. `.`, `..` 세그먼트는 허용하지 않는다. 아니면 422 `VALIDATION_ERROR`.
+  - 이유: 아티팩트 경로를 UUID로만 만드는 규칙(덮어쓰기 방지)을 API에서 보장하고, 영구 삭제 시 모델 ID로 아티팩트를 빠짐없이 찾아 파기할 수 있게 한다 (ADR 0005). 버킷과 스킴, `models/` 앞의 접두 경로는 제한하지 않는다.
 
 ### 동시 수정 방지 (ETag, ADR 0007)
 - 같은 조직의 여러 사용자가 같은 모델을 동시에 고칠 때, 다른 사람의 수정을 모르고 덮어쓰는 일(lost update)을 막는다.
 - `models.row_version`(정수)은 모델 단건 응답이 바뀌는 모든 쓰기(수정, 삭제, 복원, 버전 생성, 버전 상태 변경)에서 1씩 오른다.
-- 모델 단건 응답에는 `ETag: "<row_version>"`(strong ETag)을 붙인다.
+- 모델 단건 응답과 삭제 응답에는 `ETag: "<row_version>"`(strong ETag)을 붙인다. 삭제된 모델은 조회할 수 없으므로, 복원의 `If-Match`에는 삭제 응답의 ETag를 쓴다.
 - 수정(PATCH), 삭제(DELETE), 복원(POST restore)은 `If-Match` 헤더를 선택적으로 받는다.
   - 있으면: 모델 행을 잠근 뒤 현재 ETag와 비교하고, 다르면 412 `PRECONDITION_FAILED`와 현재 `ETag`를 반환한다.
   - 없으면: 비교 없이 처리한다(마지막 쓰기 우선). Swagger나 curl로 바로 호출할 수 있게 하기 위해서다.
   - `*`는 모델이 존재하면 통과한다. 약한 ETag(`W/"..."`)는 strong 비교 규칙에 따라 일치하지 않는 것으로 본다(412).
+  - 형식이 잘못된 값(따옴표 없는 `3` 등)은 불일치(412)와 구분해 422 `VALIDATION_ERROR`로 알린다.
+  - 판단 순서: 모델 없음(404), 복원의 삭제 안 됨(409 `MODEL_NOT_DELETED`)과 기한 경과(410)를 먼저 확인하고, 그다음 `If-Match`를 비교한다. 유형 잠금(409 `TASK_TYPE_LOCKED`)과 이름 충돌(409 `MODEL_NAME_CONFLICT`)은 `If-Match` 비교 뒤에 판단한다. 그사이 버전이 생겼거나 다른 사람이 바꿨다는 사실을 412로 먼저 알리기 위해서다.
 
 ## 저장소 구조
 ```
@@ -287,7 +293,8 @@ model-registry-api/
   - 요청 범위 값(요청 ID, 조직 ID, 사용자 ID)은 `contextvars`로 전달해 로그 필터가 자동으로 붙인다. 함수 인자로 넘기지 않는다.
 - JSON 구조화 로그: 로그 한 줄을 JSON 객체 하나로 남긴다 (`LOG_FORMAT=json` 기본값, 로컬 개발용 `text`).
   - 공통 필드: `timestamp`(UTC ISO 8601), `level`, `logger`, `message`, `request_id`, `organization_id`, `user_id`
-  - 요청당 접근 로그 한 줄: `method`, `path`, `status`, `latency_ms`. uvicorn 기본 접근 로그는 중복되므로 끈다.
+  - 요청당 접근 로그 한 줄: `method`, `path`, `status`, `latency_ms`. uvicorn 기본 접근 로그는 중복되므로 끈다. 헬스 체크(`/health/*`)는 주기적으로 호출되므로 DEBUG로 남긴다.
+  - DB 오류 메시지에 SQL 파라미터를 넣지 않는다(`hide_parameters=True`). 예외 로그에 요청 본문 값이 섞이지 않게 하기 위해서다.
   - 요청, 응답 본문은 로그에 남기지 않는다. 고객 데이터와 개인정보가 섞일 수 있기 때문이다.
   - 이유: Kubernetes의 로그 수집기(Fluent Bit, Loki 등)가 필드 단위로 바로 검색, 집계할 수 있다. 예: 조직별 5xx, 응답 지연 상위 요청.
 

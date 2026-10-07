@@ -189,8 +189,9 @@ def touch_model(models: ModelRepository, model: MLModel) -> datetime:
 def _check_precondition(model: MLModel, if_match: IfMatch | None) -> None:
     """If-Match가 있으면 잠근 모델의 현재 ETag와 비교한다 (ADR 0007).
 
-    RFC 9110에 따라 조건이 없어도 실패했을 요청(404, 409, 410)은 그 오류를 먼저 내고,
-    조건은 실제 변경 직전에 비교한다. 불일치하면 현재 ETag를 함께 돌려줘 다시 조회하게 한다.
+    모델 없음(404)과 복원 대상이 아님(409 MODEL_NOT_DELETED, 410)은 조건보다 먼저 판단한다.
+    유형 잠금과 이름 충돌(409)은 조건 비교 뒤에 판단해, 그사이 바뀐 사실을 412로 먼저 알린다.
+    불일치하면 현재 ETag를 함께 돌려줘 다시 조회하게 한다.
     """
     if if_match is not None and not if_match.matches(model.row_version):
         raise AppError(

@@ -116,7 +116,7 @@ erDiagram
         int version_no "UK(model_id, version_no)"
         uuid parent_version_id FK "nullable"
         string status "PENDING|TRAINING|READY|FAILED|ARCHIVED"
-        string artifact_uri
+        text artifact_uri
         string framework
         jsonb input_schema
         jsonb output_schema

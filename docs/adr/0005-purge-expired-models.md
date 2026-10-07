@@ -16,26 +16,26 @@
 
 ### 영구 삭제 커맨드
 
-- `scripts/purge_expired_models.py`가 `purge_at < now()`인 모델을 영구 삭제한다. API 서버와 같은 이미지에서 `python -m scripts.purge_expired_models`로 실행한다.
+- `scripts/purge_expired_models.py`가 `purge_at <= now()`인 모델을 영구 삭제한다. API 서버와 같은 이미지에서 `python -m scripts.purge_expired_models`로 실행한다.
 - 배치 단위로 삭제하고, 배치마다 별도 트랜잭션으로 커밋한다. 삭제할 행이 없을 때까지 반복한다.
 
 ```sql
 DELETE FROM models
 WHERE id IN (
     SELECT id FROM models
-    WHERE deleted_at IS NOT NULL AND purge_at < now()
+    WHERE deleted_at IS NOT NULL AND purge_at <= now()
     ORDER BY purge_at
     LIMIT :batch_size
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id;
+RETURNING id, organization_id;
 ```
 
 - 배치 크기는 `PURGE_BATCH_SIZE`(기본 500)로 조정한다. 트랜잭션을 짧게 끊어 잠금 시간과 WAL 급증을 줄인다.
 - 대상 조회는 `ix_models_purge_at` 부분 인덱스(`WHERE deleted_at IS NOT NULL`)를 쓴다.
 - `model_versions`는 FK `ON DELETE CASCADE`로 함께 삭제된다.
 - `--dry-run` 옵션은 삭제 없이 대상 수만 출력한다.
-- 삭제한 모델 ID와 건수를 로그로 남긴다. 감사 기록이자 아티팩트 정리의 입력이 된다.
+- 삭제한 모델 ID, 소유 조직 ID, 건수를 로그로 남긴다. 감사 기록이자 고객사별 파기 증빙, 아티팩트 정리의 입력이 된다.
 
 ### 복원과의 경합
 
