@@ -1,0 +1,59 @@
+# 배포 전 마이그레이션 Job (ADR 0001). compose의 migrate 서비스와 같은 역할이다.
+# Argo CD PreSync hook으로 실행해, Job이 성공해야 Deployment 롤아웃이 진행된다.
+# API 레플리카가 각자 마이그레이션을 돌리는 경쟁을 없앤다.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-registry-migrate
+  labels:
+    app.kubernetes.io/name: model-registry
+    app.kubernetes.io/component: migrate
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    # 다음 동기화 때 이전 Job을 지우고 새로 만든다 (Job 템플릿은 수정할 수 없다).
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: model-registry
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # 배포 파이프라인이 main CI를 통과한 커밋 SHA로 바꾼다 (Publish image 워크플로).
+          image: ghcr.io/sehyeokkim/model-registry-api:COMMIT_SHA
+          # 운영 DB에는 시드를 넣지 않으므로 마이그레이션만 실행한다.
+          command: ["alembic", "upgrade", "head"]
+          env:
+            # DDL 권한이 있는 마이그레이션 전용 계정 (API 계정과 분리, ADR 0001)
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: model-registry-db-migrator
+                  key: database-url
+          # ConfigMap은 참조하지 않는다. PreSync hook은 일반 리소스보다 먼저 실행되므로
+          # 첫 배포에서는 ConfigMap이 아직 없다. 나머지 설정은 앱 기본값으로 충분하다.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

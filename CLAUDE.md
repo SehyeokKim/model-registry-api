@@ -233,11 +233,13 @@ model-registry-api/
 ├── scripts/
 │   ├── seed.py           # 멱등 데모 데이터 시드 (migrate 서비스에서 실행)
 │   └── purge_expired_models.py   # 복원 기한이 지난 모델 영구 삭제 (CronJob으로 실행)
+├── deploy/
+│   └── k8s/          # Kubernetes 참조 매니페스트 (kubeconform 검증, 클러스터 배포는 범위 밖)
 ├── docs/
 │   ├── erd.md
 │   └── adr/
 ├── .github/
-│   ├── workflows/        # CI (lint, test)
+│   ├── workflows/        # CI (lint, test, compose), GHCR 이미지 게시
 │   ├── dependabot.yml    # Actions, Python 의존성 주간 업데이트 PR
 │   └── pull_request_template.md
 ├── Dockerfile

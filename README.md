@@ -225,6 +225,21 @@ docker compose logs -f api
 - API와 `migrate`는 같은 이미지를 쓰고 실행 명령만 다릅니다.
 - main에 머지되어 CI가 통과한 커밋은 `ghcr.io/sehyeokkim/model-registry-api:<커밋 SHA>`로 게시됩니다(`latest`처럼 덮어쓰이는 태그는 두지 않습니다).
 
+### Kubernetes 참조 매니페스트
+
+운영 환경에서의 실행 방식을 [`deploy/k8s/`](deploy/k8s/)에 참조 매니페스트로 두었습니다. 클러스터 배포 자체는 이 저장소의 범위 밖이며, 적용 순서와 Secret 준비는 [deploy/k8s/README.md](deploy/k8s/README.md)에 있습니다.
+
+| compose | Kubernetes | 근거 |
+|---|---|---|
+| `migrate` 서비스 | Argo CD `PreSync` hook Job (성공해야 롤아웃 진행) | ADR 0001 |
+| `api` 서비스, healthcheck | Deployment (liveness, readiness, startup probe), Service | ADR 0002 |
+| 수동 `purge_expired_models` 실행 | CronJob (매일 03:00 KST, `concurrencyPolicy: Forbid`) | ADR 0005 |
+| `API_PORT` 등 환경 변수 | ConfigMap, Secret (마이그레이션 계정과 API 계정 분리) | ADR 0001 |
+| | HPA 2–8개 (DB 연결 예산 `8 × 10 + 15 ≤ 100`) | ADR 0002 |
+
+- 모든 워크로드가 non-root, 읽기 전용 루트 파일 시스템, 권한 제거(`capabilities: drop ALL`)로 실행됩니다.
+- CI가 kubeconform으로 스키마를 검증하고(문법만, 배포는 하지 않음), 테스트가 매니페스트와 앱이 어긋나지 않는지 확인합니다. 확인 항목은 환경 변수 이름, probe 경로, 실행 사용자, 연결 예산입니다.
+
 ## 개발
 
 [uv](https://docs.astral.sh/uv/)와 Docker가 필요합니다.
@@ -245,7 +260,7 @@ uv run alembic revision --autogenerate -m "<설명>"              # 마이그레
 
 | 워크플로 | 시점 | 내용 |
 |---|---|---|
-| CI / Lint | PR, main | Ruff 린트와 포맷 검사, Hadolint(Dockerfile) |
+| CI / Lint | PR, main | Ruff 린트와 포맷 검사, Hadolint(Dockerfile), kubeconform(Kubernetes 매니페스트) |
 | CI / Test | PR, main | PostgreSQL 서비스 컨테이너로 pytest 전체 |
 | CI / Compose | PR, main | `docker compose up -d --build`로 실제 기동 후 마이그레이션, 시드, 주요 API, 내부 API, ETag, 영구 삭제 커맨드, 재기동 멱등성 확인 |
 | Publish image | main CI 성공 후 | GHCR에 커밋 SHA 태그로 이미지 게시 |
@@ -271,6 +286,7 @@ app/
 migrations/            Alembic 마이그레이션
 scripts/               데모 데이터 시드, 영구 삭제 커맨드
 tests/                 unit (DB 없음), integration (실제 PostgreSQL)
+deploy/k8s/            Kubernetes 참조 매니페스트
 docs/                  ERD, ADR
 ```
 
@@ -309,6 +325,7 @@ docs/                  ERD, ADR
 - 마이그레이션은 API와 분리된 일회성 `migrate` 서비스가 실행하고, API는 그 서비스가 성공한 뒤에만 시작합니다(`service_completed_successfully`). API 레플리카가 여러 개일 때 각자 마이그레이션을 돌리는 경쟁을 없애는 구조로, Kubernetes의 배포 전 마이그레이션 Job과 같습니다.
 - 데모 데이터는 스키마 마이그레이션과 분리된 멱등 시드 스크립트로 넣고, 운영에서는 끕니다.
 - compose의 healthcheck는 liveness(`/health/live`)와 readiness(`/health/ready`)를 나눠, Kubernetes probe와 같은 기준으로 동작합니다.
+- 같은 구조를 Kubernetes 참조 매니페스트로 옮겨, ADR의 "운영에서는 이렇게 한다"를 실행 가능한 형태로 남겼습니다([운영 작업과 설정](#kubernetes-참조-매니페스트)).
 
 ### API 문서화와 에러 처리 (ADR 0008)
 - 모든 엔드포인트에 한국어 summary와 description, 응답 모델, 낼 수 있는 에러 코드를 OpenAPI에 명시했습니다. 같은 HTTP 상태의 여러 에러 코드는 예시로 나눠 보여줍니다.
@@ -352,4 +369,5 @@ AI가 작성한 코드를 그대로 믿지 않고, 다음 방법으로 동작을
 - **실제 기동 확인**: 매 PR마다 `docker compose up -d --build`로 띄워 API를 직접 호출했고, 같은 흐름을 CI의 Compose job으로 자동화했습니다.
 - **커밋 단위 검증**: 여러 커밋으로 나눈 PR은 중간 커밋을 별도 worktree에 체크아웃해 각각 린트와 테스트가 통과하는지 확인했습니다.
 - **문서와 코드 일치**: README의 에러 코드 표가 카탈로그와 같은지 테스트로 확인합니다.
-- **독립 검토**: 범위를 넓히는 결정(예: Kubernetes 매니페스트 추가)은 별도 AI 에이전트에게 반대 입장의 검토를 맡기고, 그 근거를 ADR 원문과 대조해 확인한 뒤 진행했습니다.
+- **독립 검토**: 범위를 넓히는 결정(예: Kubernetes 매니페스트 추가)은 별도 AI 에이전트에게 반대 입장의 검토를 맡기고, 그 근거를 ADR 원문과 대조해 확인한 뒤 진행했습니다. 그 검토에서 나온 지적(마이그레이션 Job의 실행 순서 보장, 계정 분리, 매니페스트와 앱의 불일치 위험)을 매니페스트와 테스트에 반영했습니다.
+- **클러스터 없이 확인할 수 있는 것은 확인**: 매니페스트의 보안 설정(읽기 전용 루트 파일 시스템, non-root, 권한 제거)은 같은 조건의 `docker run`으로 실제 이미지가 동작하는지 확인했습니다.

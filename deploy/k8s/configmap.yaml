@@ -1,0 +1,21 @@
+# 비밀이 아닌 설정. 변수 목록과 의미는 .env.example, 앱의 기본값은 app/core/config.py를 따른다.
+# DB 접속 정보(DATABASE_URL)는 Secret으로 따로 주입한다 (deploy/k8s/README.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-registry-config
+  labels:
+    app.kubernetes.io/name: model-registry
+    app.kubernetes.io/component: config
+data:
+  LOG_LEVEL: INFO
+  LOG_FORMAT: json
+  # Pod당 최대 연결 = DB_POOL_SIZE + DB_MAX_OVERFLOW = 10 (ADR 0002)
+  DB_POOL_SIZE: "5"
+  DB_MAX_OVERFLOW: "5"
+  DB_POOL_TIMEOUT: "5"
+  DB_CONNECT_TIMEOUT: "5"
+  MODEL_RESTORE_WINDOW_DAYS: "30"
+  PURGE_BATCH_SIZE: "500"
+  # 운영 DB에는 데모 데이터를 넣지 않는다 (ADR 0001)
+  SEED_DEMO_DATA: "false"

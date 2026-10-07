@@ -1,0 +1,25 @@
+# API Pod 수 자동 조절. 최대 Pod 수는 DB 연결 예산으로 정한다 (ADR 0002).
+#   HPA 최대 Pod 수 × Pod당 최대 연결 수 + 운영 작업 여유 ≤ max_connections
+#   8 × 10 + 15 = 95 ≤ 100 (PostgreSQL 기본값)
+# 8개를 넘겨야 하면 PgBouncer를 먼저 도입한다.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: model-registry-api
+  labels:
+    app.kubernetes.io/name: model-registry
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: model-registry-api
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

@@ -44,6 +44,13 @@ jobs:
       - name: Hadolint
         run: docker run --rm -i hadolint/hadolint:v2.14.0 < Dockerfile
 
+      # Kubernetes 참조 매니페스트의 스키마 검증 (문법과 필드만, 클러스터 배포는 하지 않는다)
+      - name: Kubeconform
+        run: >-
+          docker run --rm -v "$PWD/deploy/k8s:/manifests:ro"
+          ghcr.io/yannh/kubeconform:v0.8.0
+          -strict -summary -kubernetes-version 1.30.0 /manifests
+
   test:
     name: Test
     runs-on: ubuntu-24.04

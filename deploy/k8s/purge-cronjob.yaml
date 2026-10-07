@@ -1,0 +1,68 @@
+# 복원 기한이 지난 모델 영구 삭제 (ADR 0005). 매일 저부하 시간에 실행한다.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: model-registry-purge-expired-models
+  labels:
+    app.kubernetes.io/name: model-registry
+    app.kubernetes.io/component: purge
+spec:
+  schedule: "0 3 * * *"
+  timeZone: Asia/Seoul
+  # 이전 실행이 끝나지 않았으면 새 실행을 건너뛴다. SKIP LOCKED로 겹쳐도 안전하지만 불필요한 경합을 피한다.
+  concurrencyPolicy: Forbid
+  # 컨트롤러 중단 등으로 놓친 실행은 1시간 안에서만 따라잡는다.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: model-registry
+        app.kubernetes.io/component: purge
+    spec:
+      # DB 오류로 실패하면(종료 코드 0이 아님) 다시 시도한다. 이미 커밋한 배치는 남는다.
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: model-registry
+            app.kubernetes.io/component: purge
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: ghcr-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: purge
+              # 배포 파이프라인이 main CI를 통과한 커밋 SHA로 바꾼다 (Publish image 워크플로).
+              image: ghcr.io/sehyeokkim/model-registry-api:COMMIT_SHA
+              command: ["python", "-m", "scripts.purge_expired_models"]
+              env:
+                # 행 삭제는 DML이므로 API 계정을 쓴다.
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: model-registry-db-app
+                      key: database-url
+              envFrom:
+                - configMapRef:
+                    name: model-registry-config
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
