@@ -80,7 +80,7 @@ ERROR_CATALOG: dict[ErrorCode, ErrorSpec] = {
     ),
     ErrorCode.MODEL_PURGED: ErrorSpec(
         410,
-        "복원 기한(`purge_at`)이 지나 복원할 수 없는 모델 (영구 삭제 대기 중)",
+        "복원 기한(`purge_at`)이 지나 영구 삭제된 것으로 보는 모델의 복원 시도",
         "The restore deadline has passed and the model is pending permanent deletion.",
     ),
     ErrorCode.INVALID_PARENT_VERSION: ErrorSpec(

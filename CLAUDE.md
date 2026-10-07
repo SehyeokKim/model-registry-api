@@ -113,6 +113,7 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 
 | 코드 | HTTP | 발생 조건 |
 |---|---|---|
+| `BAD_REQUEST` | 400 | 요청 본문을 해석할 수 없음 (UTF-8이 아닌 인코딩 등) |
 | `UNAUTHORIZED` | 401 | `X-User-Id`가 없거나, UUID 형식이 아니거나, 존재하지 않는 사용자 |
 | `FORBIDDEN` | 403 | 내부 사용자가 고객 API를 호출하거나, 고객이 내부 API를 호출 |
 | `NOT_FOUND` | 404 | 정의되지 않은 경로 |
@@ -125,7 +126,7 @@ uv run alembic revision --autogenerate -m "<설명>"     # 마이그레이션 �
 | `MODEL_VERSION_CONFLICT` | 409 | 버전 번호 unique 제약 위반 (재시도 가능) |
 | `TASK_TYPE_LOCKED` | 409 | 버전이 있는 모델의 `task_type` 변경 시도 |
 | `MODEL_NOT_DELETED` | 409 | 삭제되지 않은 모델 복원 시도 |
-| `MODEL_PURGED` | 410 | 복원 기한(`purge_at`)이 지났지만 아직 영구 삭제 전인 모델 복원 시도 |
+| `MODEL_PURGED` | 410 | 복원 기한(`purge_at`)이 지나 영구 삭제된 것으로 보는 모델의 복원 시도 |
 | `EMPTY_UPDATE` | 422 | 변경할 필드가 없는 PATCH 요청(`{}`) |
 | `INVALID_PARENT_VERSION` | 422 | 부모 버전이 없거나, 다른 모델의 버전이거나, `READY`가 아님 |
 | `VALIDATION_ERROR` | 422 | 요청 형식이나 값 검증 실패 (정의되지 않은 필드, 잘못된 커서, 잘못된 JSON Schema 포함) |
